@@ -29,6 +29,12 @@ Google's high-performance dynamic image-serving infrastructure.
 extensions:
   jinja2:
   - extensions.google_cloud_images.GoogleCloudImagesExtension
+  preprocessors:
+  - extensions.google_cloud_images.GoogleCloudImagesPreprocessor
+
+preprocessors:
+- kind: google_cloud_images
+  backend: <url to backend service>
 ```
 
 ### In templates
