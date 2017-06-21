@@ -18,8 +18,15 @@ class GoogleImage(object):
     def __init__(self, pod, bucket_path):
         self.pod = pod
         self.bucket_path = bucket_path
+        self._cache = None
         self._base_url = None
         self._backend = None
+
+    @property
+    def cache(self):
+        if self._cache is None:
+            self._cache = self.pod.podcache.get_object_cache('ext-google-cloud-images')
+        return self._cache
 
     @property
     def backend(self):
@@ -34,10 +41,15 @@ class GoogleImage(object):
         """Returns a URL corresponding to the image served by Google's
         image-serving infrastructure."""
         if self._base_url is None:
-            backend = self.backend
-            message = 'Generating serving URL using {} -> {}'
-            self.pod.logger.info(message.format(backend, self.bucket_path))
-            self._base_url = get_image_serving_url(backend, self.bucket_path)
+            key = '{}:{}'.format(self.backend, self.bucket_path)
+            base_url = self.cache.get(key)
+            if base_url is not None:
+                self._base_url = base_url
+            else:
+                message = 'Generating serving URL -> {}'
+                self.pod.logger.info(message.format(self.bucket_path))
+                self._base_url = get_image_serving_url(self.backend, self.bucket_path)
+                self.cache.add(key, self._base_url)
         return self._base_url
 
     def url(self, options=None):
@@ -70,4 +82,5 @@ class GoogleCloudImagesPreprocessor(grow.Preprocessor):
         backend = messages.StringField(1)
 
     def run(self, *args, **kwargs):
-        pass
+        message = 'Using Google Cloud images backend -> {}'.format(self.config.backend)
+        self.pod.logger.info(message)
