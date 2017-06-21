@@ -5,7 +5,42 @@ Google's high-performance dynamic image-serving infrastructure.
 
 ## Concept
 
-(WIP)
+Google offers an API for serving images uploaded to Google Cloud Storage through a high-performance, dynamic image-serving infrastructure. The system provides users with a way to perform a number of operations on images on-the-fly – making it extremely well-suited for developers to implement assets sized, cropped, formatted, etc. in the right way for the user – with no added work.
+
+For example, the image-serving infrastructure can reformat (JPG, PNG, WEBP), resize or crop, and transform the image in a number of ways on-the-fly.
+
+Here's the workflow:
+
+1. Upload an image to Google Cloud Storage.
+1. Use the template function or YAML extension provided in this extension.
+1. Supply options to the extension to generate the right URL.
+
+Here are a few live examples:
+
+```
+# Resize to 100 pixels wide
+s100
+```
+![](https://lh3.googleusercontent.com/UN7taQ_uv67DQ2BO_WAc5i-b_KHPl4hWXQYG9dj_8FesTSruE_k-AyPId2Jc1DujAMP_kFpD413i8T4TK-O_=s100)
+
+```
+# Smart crop, border 100%, format PNG, size 200
+pp-br100-rp-s200
+```
+![](https://lh3.googleusercontent.com/UN7taQ_uv67DQ2BO_WAc5i-b_KHPl4hWXQYG9dj_8FesTSruE_k-AyPId2Jc1DujAMP_kFpD413i8T4TK-O_=pp-br100-rp-s200)
+
+```
+# Size 200, rotate 90
+s200-r90
+```
+![](https://lh3.googleusercontent.com/UN7taQ_uv67DQ2BO_WAc5i-b_KHPl4hWXQYG9dj_8FesTSruE_k-AyPId2Jc1DujAMP_kFpD413i8T4TK-O_=s200-r90)
+
+```
+# Width 100, height 300, crop, smart crop, quality 100, format JPG
+w100-h300-c-pp-l100-rj
+```
+![](https://lh3.googleusercontent.com/UN7taQ_uv67DQ2BO_WAc5i-b_KHPl4hWXQYG9dj_8FesTSruE_k-AyPId2Jc1DujAMP_kFpD413i8T4TK-O_=w100-h300-c-pp-l100-rj)
+
 
 ### Features
 
