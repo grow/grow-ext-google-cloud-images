@@ -8,7 +8,7 @@ setup(
     author='Grow SDK Authors',
     author_email='hello@grow.io',
     include_package_data=False,
-    py_modules=[
+    packages=[
         'google_cloud_images',
     ],
     install_requires=[
