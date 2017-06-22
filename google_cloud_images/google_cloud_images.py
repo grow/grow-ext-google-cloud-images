@@ -18,9 +18,9 @@ class GoogleImage(object):
     def __init__(self, pod, bucket_path):
         self.pod = pod
         self.bucket_path = bucket_path
-        self._cache = None
         self._base_url = None
         self._backend = None
+        self._cache = None
 
     @property
     def cache(self):
