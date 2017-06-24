@@ -9,16 +9,20 @@ class GetServingUrlHandler(webapp2.RequestHandler):
 
     def get(self):
         gs_path = self.request.get('gs_path')
+        service_account_email = \
+            '{}@appspot.gserviceaccount.com'.format(app_identity.get_application_id())
         if not gs_path:
-            self.abort(400)
+            detail = (
+                'Usage: Share your GCS objects with `{}` and make another'
+                ' request to this service. Include the `gs_path` query parameter,'
+                ' formatted as `/<bucket>/<path>.ext`'.format(service_account_email))
+            self.abort(400, detail=detail)
             return
         gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
 	blob_key = blobstore.create_gs_key(gs_path)
         try:
             url = images.get_serving_url(blob_key, secure_url=True)
         except images.TransformationError:
-            service_account_email = \
-                '{}@appspot.gserviceaccount.com'.format(app_identity.get_application_id())
             detail = (
                 'There was a problem transforming the image. Ensure the'
                 ' following service account has access to the object in Google Cloud'

@@ -1,0 +1,4 @@
+**.mo
+testdata/.podcache.yaml
+testdata/build/
+testdata/extensions/

@@ -22,10 +22,14 @@ class GoogleImage(object):
         self._backend = None
         self._cache = None
 
+    def __repr__(self):
+        return '<GoogleImage {}>'.format(self.bucket_path)
+
     @property
     def cache(self):
         if self._cache is None:
-            self._cache = self.pod.podcache.get_object_cache('ext-google-cloud-images')
+            get_object_cache = self.pod.podcache.get_object_cache
+            self._cache = get_object_cache('ext-google-cloud-images')
         return self._cache
 
     @property
@@ -48,7 +52,8 @@ class GoogleImage(object):
             else:
                 message = 'Generating serving URL -> {}'
                 self.pod.logger.info(message.format(self.bucket_path))
-                self._base_url = get_image_serving_url(self.backend, self.bucket_path)
+                self._base_url = \
+                        get_image_serving_url(self.backend, self.bucket_path)
                 self.cache.add(key, self._base_url)
         return self._base_url
 
@@ -64,7 +69,8 @@ class GoogleCloudImagesExtension(Extension):
 
     def __init__(self, environment):
         super(GoogleCloudImagesExtension, self).__init__(environment)
-        environment.globals['google_image'] = GoogleCloudImagesExtension.create_google_image
+        environment.globals['google_image'] = \
+            GoogleCloudImagesExtension.create_google_image
 
     @staticmethod
     @jinja2.contextfunction
@@ -82,5 +88,6 @@ class GoogleCloudImagesPreprocessor(grow.Preprocessor):
         backend = messages.StringField(1)
 
     def run(self, *args, **kwargs):
-        message = 'Using Google Cloud images backend -> {}'.format(self.config.backend)
+        text = 'Using Google Cloud images backend -> {}'
+        message = text.format(self.config.backend)
         self.pod.logger.info(message)

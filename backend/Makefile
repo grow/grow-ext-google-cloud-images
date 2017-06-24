@@ -1,5 +1,5 @@
 $project :=
-$version := grow-ext-google-cloud-images
+$version := grow-ext-cloud-images
 
 deploy:
 	gcloud app deploy \
