@@ -14,8 +14,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             '{}@appspot.gserviceaccount.com'.format(app_identity.get_application_id())
         if not gs_path:
             detail = (
-                'Usage: Share your GCS objects with `{}` and make another'
-                ' request to this service. Make requests to: '
+                'Usage: Share GCS objects with `{}`. Make requests to:'
                 ' {}://{}/<bucket>/<path>.ext'.format(
                     service_account_email,
                     os.getenv('wsgi.url_scheme'),
