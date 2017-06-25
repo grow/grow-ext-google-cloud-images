@@ -16,7 +16,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             detail = (
                 'Usage: Share your GCS objects with `{}` and make another'
                 ' request to this service. Make requests to: '
-                ' {}:{}/<bucket>/<path>.ext'.format(
+                ' {}://{}/<bucket>/<path>.ext'.format(
                     service_account_email,
                     os.getenv('wsgi.url_scheme'),
                     os.getenv('HTTP_HOST')))
