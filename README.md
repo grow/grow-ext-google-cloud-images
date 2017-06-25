@@ -1,5 +1,7 @@
 # grow-ext-google-cloud-images
 
+[![Build Status](https://travis-ci.org/grow/grow-ext-google-cloud-images.svg?branch=master)](https://travis-ci.org/grow/grow-ext-google-cloud-images)
+
 (WIP) An extension for hosting images in Google Cloud Storage and serving them via
 Google's high-performance dynamic image-serving infrastructure.
 
