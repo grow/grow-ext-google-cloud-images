@@ -7,6 +7,6 @@ install:
 - pip install git+git://github.com/grow/grow
 
 script:
-- cd testdata
+- cd example
 - grow install
 - grow build
