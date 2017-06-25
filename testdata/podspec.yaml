@@ -6,4 +6,4 @@ extensions:
 
 preprocessors:
 - kind: google_cloud_images
-  backend: https://grow-ext-cloud-images.appspot.com
+  backend: https://gci.grow.io

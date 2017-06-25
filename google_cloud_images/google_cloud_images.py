@@ -5,12 +5,20 @@ import jinja2
 import requests
 
 
+class Error(Exception):
+    pass
+
+
 def get_image_serving_url(backend, bucket_path):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
     resp = requests.get(backend, params)
-    return resp.json()['url']
+    try:
+        return resp.json()['url']
+    except ValueError:
+        text = 'An error occurred generating a Google Cloud Images URL for: {}'
+        raise Error(text.format(bucket_path))
 
 
 class GoogleImage(object):

@@ -1,3 +1,4 @@
+service: ext-cloud-images
 api_version: 1
 runtime: python27
 threadsafe: yes

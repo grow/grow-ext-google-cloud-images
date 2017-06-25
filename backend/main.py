@@ -2,27 +2,38 @@ from google.appengine.api import app_identity
 from google.appengine.api import images
 from google.appengine.ext import blobstore
 import json
+import os
 import webapp2
 
 
 class GetServingUrlHandler(webapp2.RequestHandler):
 
-    def get(self):
-        gs_path = self.request.get('gs_path')
+    def get(self, gs_path):
+        gs_path = self.request.get('gs_path') or gs_path
         service_account_email = \
             '{}@appspot.gserviceaccount.com'.format(app_identity.get_application_id())
         if not gs_path:
             detail = (
                 'Usage: Share your GCS objects with `{}` and make another'
-                ' request to this service. Include the `gs_path` query parameter,'
-                ' formatted as `/<bucket>/<path>.ext`'.format(service_account_email))
+                ' request to this service. Make requests to: '
+                ' {}:{}/<bucket>/<path>.ext'.format(
+                    service_account_email,
+                    os.getenv('wsgi.url_scheme'),
+                    os.getenv('HTTP_HOST')))
             self.abort(400, detail=detail)
             return
         gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
-	blob_key = blobstore.create_gs_key(gs_path)
         try:
+            blob_key = blobstore.create_gs_key(gs_path)
             url = images.get_serving_url(blob_key, secure_url=True)
-        except images.TransformationError:
+        except images.ObjectNotFoundError:
+            detail = (
+                'The object was not found. Ensure the following service'
+                ' account has access to the object in Google Cloud Storage:'
+                ' {}'.format(service_account_email))
+            self.abort(400, explanation='ObjectNotFoundError', detail=detail)
+            return
+        except (images.TransformationError, ValueError):
             detail = (
                 'There was a problem transforming the image. Ensure the'
                 ' following service account has access to the object in Google Cloud'
@@ -42,5 +53,5 @@ class GetServingUrlHandler(webapp2.RequestHandler):
 
 
 app = webapp2.WSGIApplication([
-	('/.*', GetServingUrlHandler),
+  ('/(.*)', GetServingUrlHandler),
 ])
