@@ -23,8 +23,9 @@ def get_image_serving_url(backend, bucket_path):
 
 class GoogleImage(object):
 
-    def __init__(self, pod, bucket_path):
+    def __init__(self, pod, bucket_path, locale=None):
         self.pod = pod
+        self.locale = locale
         self.bucket_path = bucket_path
         self._base_url = None
         self._backend = None
