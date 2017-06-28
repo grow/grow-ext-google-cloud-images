@@ -45,7 +45,7 @@ class GoogleImage(object):
     def backend(self):
         if self._backend is None:
             for preprocessor in self.pod.list_preprocessors():
-                if isinstance(preprocessor, GoogleCloudImagesPreprocessor):
+                if preprocessor.KIND == GoogleCloudImagesPreprocessor.KIND:
                     self._backend = preprocessor.config.backend
         return self._backend
 
