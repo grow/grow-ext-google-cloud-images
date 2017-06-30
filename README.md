@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/grow/grow-ext-google-cloud-images.svg?branch=master)](https://travis-ci.org/grow/grow-ext-google-cloud-images)
 
-(WIP) An extension for hosting images in Google Cloud Storage and serving them via
+An extension for hosting images in Google Cloud Storage and serving them via
 Google's high-performance dynamic image-serving infrastructure.
 
 ## Concept
@@ -96,6 +96,12 @@ gsutil mb -p <project> gs://<bucket>
 # Set the default ACL for objects uploaded to the bucket. Note the below
 # command grants OWNER access to the service account.
 gsutil defacl ch -u account@example.com:O gs://<bucket>
+
+# Ensure that the files are set with `public-read` permissions. URLs generated
+# by the images service respect GCS object permissions so if you intend to serve
+# them publicly, they will need to be `public-read`. Adjust the default ACL with
+# the command below.
+gsutil defacl set public-read gs://<bucket>
 
 # Upload assets to the Google Cloud Storage bucket.
 gsutil cp file.jpg gs://<bucket>/<path>/
