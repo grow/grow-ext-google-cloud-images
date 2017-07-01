@@ -142,6 +142,7 @@ StackOverflow](https://stackoverflow.com/q/25148567).
 - n — same as c, but crops from the center
 - p — smart square crop, attempts cropping to faces
 - pp — alternate smart square crop, does not cut off faces (?)
+- pa – preserve aspect ratio (when used with `w` or `h` params)
 - cc — generates a circularly cropped image
 - ci — square crop to smallest of: width, height, or specified =s parameter
 - nu — no-upscaling. Disables resizing an image to larger than its original
