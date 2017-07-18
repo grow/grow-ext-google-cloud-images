@@ -11,7 +11,7 @@ import webapp2
 
 APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
-BUCKET_PATH = '{}/grow-ext-cloud-images-uploads/'.format(BUCKET_NAME)
+FOLDER = 'grow-ext-cloud-images-uploads'
 
 
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -26,13 +26,15 @@ class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
-    def get(self):
+    def get(self, bucket=None):
+        bucket = bucket or BUCKET_NAME
+        gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
         action = blobstore.create_upload_url(
-                '/callback', gs_bucket_name=BUCKET_PATH)
+                '/callback', gs_bucket_name=gs_bucket_name)
         # Support for Cloudflare proxy.
         action = action.replace('http://', 'https://')
         kwargs = {
-            'bucket': BUCKET_NAME,
+            'bucket': gs_bucket_name,
             'action': action,
         }
         self.response.out.write(template.render('upload.html', kwargs))
@@ -94,6 +96,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
 
 app = webapp2.WSGIApplication([
   ('/callback', UploadCallbackHandler),
+  ('/upload/(.*)', UploadHandler),
   ('/upload', UploadHandler),
   ('/(.*)', GetServingUrlHandler),
 ])

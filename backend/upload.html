@@ -11,9 +11,17 @@
       Using Bucket -&gt; <b>{{bucket}}</b>
     </div>
     <div>
-      <input
-        onchange="document.getElementById('form').submit();"
-        type="file"
-        name="file">
+      <input type="file" name="file">
     </div>
+    <div>
+      <button type="submit">Upload</button>
+    </div>
+    <!-- TODO: Improve UI.
+    <script>
+      var inputEl = document.querySelector('input');
+      inputEl.addEventListener('change', function() {
+        document.getElementById('form').submit();
+      });
+    </script>
+    -->
   </form>
