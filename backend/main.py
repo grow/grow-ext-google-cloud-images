@@ -1,6 +1,8 @@
 from google.appengine.api import app_identity
 from google.appengine.api import images
 from google.appengine.ext import blobstore
+from google.appengine.ext.webapp import blobstore_handlers
+from google.appengine.ext.webapp import template
 import json
 import logging
 import os
@@ -8,6 +10,30 @@ import webapp2
 
 
 APPID = app_identity.get_application_id()
+BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
+BUCKET_PATH = '{}/grow-ext-cloud-images-uploads/'.format(BUCKET_NAME)
+
+
+class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
+
+    def post(self):
+        uploaded_files = self.get_uploads('file')
+        blob_info = uploaded_files[0]
+        blob_key = blob_info.key()
+        url = images.get_serving_url(blob_key, secure_url=True)
+        self.redirect(url)
+
+
+class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
+
+    def get(self):
+        action = blobstore.create_upload_url(
+                '/callback', gs_bucket_name=BUCKET_PATH)
+        kwargs = {
+            'bucket': BUCKET_NAME,
+            'action': action,
+        }
+        self.response.out.write(template.render('upload.html', kwargs))
 
 
 class GetServingUrlHandler(webapp2.RequestHandler):
@@ -65,5 +91,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
 
 
 app = webapp2.WSGIApplication([
+  ('/callback', UploadCallbackHandler),
+  ('/upload', UploadHandler),
   ('/(.*)', GetServingUrlHandler),
 ])

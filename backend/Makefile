@@ -1,5 +1,8 @@
 $project :=
 
+run:
+	dev_appserver.py app.yaml
+
 deploy-dispatch:
 	gcloud app deploy \
 		-q \

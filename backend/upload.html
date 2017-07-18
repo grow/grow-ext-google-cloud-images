@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Upload</title>
+<body>
+  <form
+    id="form"
+    action="{{action}}"
+    method="post"
+    enctype="multipart/form-data">
+    <div>
+      Using Bucket -&gt; <b>{{bucket}}</b>
+    </div>
+    <div>
+      <input
+        onchange="document.getElementById('form').submit();"
+        type="file"
+        name="file">
+    </div>
+  </form>
