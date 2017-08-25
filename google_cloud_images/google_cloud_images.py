@@ -37,8 +37,9 @@ class GoogleImage(object):
     @property
     def cache(self):
         if self._cache is None:
-            get_object_cache = self.pod.podcache.get_object_cache
-            self._cache = get_object_cache('ext-google-cloud-images')
+            podcache = self.pod.podcache
+            ident = 'ext-google-cloud-images'
+            self._cache = podcache.get_object_cache(ident, write_to_file=True)
         return self._cache
 
     @property
