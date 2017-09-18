@@ -1,8 +1,12 @@
+from google.appengine.ext import vendor
+vendor.add('lib')
+
 from google.appengine.api import app_identity
 from google.appengine.api import images
 from google.appengine.ext import blobstore
 from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.ext.webapp import template
+import cloudstorage as gcs
 import json
 import logging
 import os
@@ -12,6 +16,12 @@ import webapp2
 APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
 FOLDER = 'grow-ext-cloud-images-uploads'
+
+gcs.set_default_retry_params(
+    gcs.RetryParams(initial_delay=0.2,
+                    max_delay=5.0,
+                    backoff_factor=2,
+                    max_retry_period=15))
 
 
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -42,8 +52,33 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class GetServingUrlHandler(webapp2.RequestHandler):
 
+    def normalize_gs_path(self, gs_path, locale):
+        gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
+        if '{locale}' not in gs_path:
+            return gs_path
+	# Retrieve a localized image if it exists, otherwise strip the locale
+        # placeholder from the path and return the base image.
+        localized_gs_path = gs_path.replace('{locale}', locale)
+	try:
+            stat_result = gcs.stat(localized_gs_path[3:])
+            return localized_gs_path
+	except (gcs.NotFoundError, gcs.ForbiddenError):
+            # If no file exists for the full locale identifier (language and
+            # territory), attempt retrieving a file for just the territory.
+            if '_' in locale:
+                language, territory = locale.split('_', 1)
+                localized_gs_path = \
+                        gs_path.replace('{locale}', '_{}'.format(territory))
+                try:
+                    stat_result = gcs.stat(localized_gs_path[3:])
+                    return localized_gs_path
+                except (gcs.NotFoundError, gcs.ForbiddenError):
+                    pass
+        return gs_path.replace('@{locale}', '')
+
     def get(self, gs_path):
         gs_path = self.request.get('gs_path') or gs_path
+        locale = self.request.get('locale')
         service_account_email = \
             '{}@appspot.gserviceaccount.com'.format(APPID)
         if not gs_path:
@@ -55,9 +90,9 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                     os.getenv('HTTP_HOST')))
             self.abort(400, detail=detail)
             return
-        gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
+        gs_path = self.normalize_gs_path(gs_path, locale)
+        blob_key = blobstore.create_gs_key(gs_path)
         try:
-            blob_key = blobstore.create_gs_key(gs_path)
             url = images.get_serving_url(blob_key, secure_url=True)
         except images.AccessDeniedError:
             detail = (

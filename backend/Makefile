@@ -1,5 +1,8 @@
 $project :=
 
+install:
+	pip install -r requirements.txt -t lib
+
 run:
 	dev_appserver.py app.yaml
 

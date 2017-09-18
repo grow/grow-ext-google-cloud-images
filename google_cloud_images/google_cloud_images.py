@@ -9,10 +9,12 @@ class Error(Exception):
     pass
 
 
-def get_image_serving_url(backend, bucket_path):
+def get_image_serving_url(backend, bucket_path, locale=None):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
+    if locale:
+        params['locale'] = locale
     resp = requests.get(backend, params)
     try:
         return resp.json()['url']
@@ -63,7 +65,8 @@ class GoogleImage(object):
                 message = 'Generating serving URL -> {}'
                 self.pod.logger.info(message.format(self.bucket_path))
                 self._base_url = \
-                        get_image_serving_url(self.backend, self.bucket_path)
+                        get_image_serving_url(self.backend, self.bucket_path,
+                                              locale=self.locale)
                 self.cache.add(key, self._base_url)
         return self._base_url
 
@@ -85,8 +88,14 @@ class GoogleCloudImagesExtension(Extension):
     @staticmethod
     @jinja2.contextfunction
     def create_google_image(ctx, bucket_path):
-        pod = ctx['doc'].pod
-        return GoogleImage(pod, bucket_path)
+        if 'doc' not in ctx:
+            raise Exception(
+                'Missing `doc` in the template context. Are'
+                ' you using `google_image` within a macro? Remember to {%'
+                ' import ... with context %}.')
+        doc = ctx['doc']
+        pod = doc.pod
+        return GoogleImage(pod, bucket_path, locale=doc.locale)
 
 
 

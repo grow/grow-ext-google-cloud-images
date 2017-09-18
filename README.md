@@ -119,7 +119,7 @@ gsutil cp file.jpg gs://<bucket>/<path>/
 {{google_image("/bucket/folder/path.jpg").url(['s1440'])}}
 
 # Localized image URL.
-{{google_image("/bucket/folder/path.jpg", locale='de').url()}}
+{{google_image("/bucket/folder/path@{locale}.jpg").url()}}
 ```
 
 ## URL options
