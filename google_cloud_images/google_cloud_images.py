@@ -9,7 +9,7 @@ class Error(Exception):
     pass
 
 
-def get_image_serving_url(backend, bucket_path, locale=None):
+def get_image_serving_data(backend, bucket_path, locale=None):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
@@ -17,7 +17,7 @@ def get_image_serving_url(backend, bucket_path, locale=None):
         params['locale'] = locale
     resp = requests.get(backend, params)
     try:
-        return resp.json()['url']
+        return resp.json()
     except ValueError:
         text = 'An error occurred generating a Google Cloud Images URL for: {}'
         raise Error(text.format(bucket_path))
@@ -32,6 +32,7 @@ class GoogleImage(object):
         self._base_url = None
         self._backend = None
         self._cache = None
+        self.__data = None
 
     def __repr__(self):
         return '<GoogleImage {}>'.format(self.bucket_path)
@@ -53,32 +54,42 @@ class GoogleImage(object):
         return self._backend
 
     @property
+    def _data(self):
+        if self.__data is None:
+            message = 'Generating Google Cloud Images data -> {}'
+            self.pod.logger.info(message.format(self.bucket_path))
+            data = get_image_serving_data(self.backend, self.bucket_path,
+                                          locale=self.locale)
+            self.__data = data
+        return self.__data
+
+    @property
+    def _cache_key(self):
+        if '{locale}' in self.bucket_path:
+            return '{}:{}:{}'.format(self.backend, self.bucket_path, self.locale)
+        return '{}:{}'.format(self.backend, self.bucket_path)
+
+    @property
     def base_url(self):
         """Returns a URL corresponding to the image served by Google's
         image-serving infrastructure."""
         if self._base_url is None:
-            if '{locale}' in self.bucket_path:
-                key = '{}:{}:{}'.format(self.backend, self.bucket_path, self.locale)
-            else:
-                key = '{}:{}'.format(self.backend, self.bucket_path)
-            base_url = self.cache.get(key)
+            base_url = self.cache.get(self._cache_key)
             if base_url is not None:
                 self._base_url = base_url
             else:
-                message = 'Generating serving URL -> {}'
-                self.pod.logger.info(message.format(self.bucket_path))
-                self._base_url = \
-                        get_image_serving_url(self.backend, self.bucket_path,
-                                              locale=self.locale)
-                self.cache.add(key, self._base_url)
+                self._base_url = self._data.get('url')
+                self.cache.add(self._cache_key, self._base_url)
         return self._base_url
+
+    @property
+    def etag(self):
+        return self._data['etag']
 
     def url(self, options=None):
         if not options:
             return self.base_url
-        url = self.base_url
         return '{}={}'.format(self.base_url, '-'.join(options))
-
 
 
 class GoogleCloudImagesExtension(Extension):

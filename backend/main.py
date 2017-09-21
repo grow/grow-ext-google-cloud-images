@@ -4,6 +4,7 @@ vendor.add('lib')
 from google.appengine.api import app_identity
 from google.appengine.api import images
 from google.appengine.ext import blobstore
+from google.appengine.ext import ndb
 from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.ext.webapp import template
 import cloudstorage as gcs
@@ -22,6 +23,12 @@ gcs.set_default_retry_params(
                     max_delay=5.0,
                     backoff_factor=2,
                     max_retry_period=15))
+
+
+# TODO: Log uploaded images so they can be reset/deleted by path later.
+class UploadedImage(ndb.Model):
+    path = ndb.StringProperty(repeated=True)
+
 
 
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -55,13 +62,14 @@ class GetServingUrlHandler(webapp2.RequestHandler):
     def normalize_gs_path(self, gs_path, locale):
         gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
         if '{locale}' not in gs_path:
-            return gs_path
+            stat_result = gcs.stat(gs_path[3:])
+            return gs_path, stat_result
 	# Retrieve a localized image if it exists, otherwise strip the locale
         # placeholder from the path and return the base image.
         localized_gs_path = gs_path.replace('{locale}', locale)
 	try:
             stat_result = gcs.stat(localized_gs_path[3:])
-            return localized_gs_path
+            return localized_gs_path, stat_result
 	except (gcs.NotFoundError, gcs.ForbiddenError):
             # If no file exists for the full locale identifier (language and
             # territory), attempt retrieving a file for just the territory.
@@ -71,13 +79,14 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                         gs_path.replace('{locale}', '_{}'.format(territory))
                 try:
                     stat_result = gcs.stat(localized_gs_path[3:])
-                    return localized_gs_path
+                    return localized_gs_path, stat_result
                 except (gcs.NotFoundError, gcs.ForbiddenError):
                     pass
-        return gs_path.replace('@{locale}', '')
+        return gs_path.replace('@{locale}', ''), stat_result
 
     def get(self, gs_path):
         gs_path = self.request.get('gs_path') or gs_path
+        reset_cache = self.request.get('reset_cache')
         locale = self.request.get('locale')
         service_account_email = \
             '{}@appspot.gserviceaccount.com'.format(APPID)
@@ -90,8 +99,13 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                     os.getenv('HTTP_HOST')))
             self.abort(400, detail=detail)
             return
-        gs_path = self.normalize_gs_path(gs_path, locale)
+        gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
         blob_key = blobstore.create_gs_key(gs_path)
+        if reset_cache:
+            try:
+                images.delete_serving_url(blob_key)
+            except images.Error as e:
+                logging.error('Error deleting {} -> {}'.format(gs_path, str(e)))
         try:
             url = images.get_serving_url(blob_key, secure_url=True)
         except images.AccessDeniedError:
@@ -124,7 +138,14 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                 url += '=s{}'.format(size)
             self.redirect(url)
             return
-        response_content = json.dumps({'url': url})
+        response_content = json.dumps({
+            'content_type': stat_result.content_type,
+            'created': stat_result.st_ctime,
+            'etag': stat_result.etag,
+            'metadata': stat_result.metadata,
+            'size': stat_result.st_size,
+            'url': url,
+        })
         self.response.headers['Content-Type'] = 'application/json'
         self.response.out.write(response_content)
 
