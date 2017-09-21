@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='grow-ext-google-cloud-images',
-    version='1.0.3',
+    version='1.0.4',
     zip_safe=False,
     license='MIT',
     author='Grow SDK Authors',

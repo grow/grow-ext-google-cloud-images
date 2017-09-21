@@ -57,7 +57,10 @@ class GoogleImage(object):
         """Returns a URL corresponding to the image served by Google's
         image-serving infrastructure."""
         if self._base_url is None:
-            key = '{}:{}:{}'.format(self.backend, self.bucket_path, self.locale)
+            if '{locale}' in self.bucket_path:
+                key = '{}:{}:{}'.format(self.backend, self.bucket_path, self.locale)
+            else:
+                key = '{}:{}'.format(self.backend, self.bucket_path)
             base_url = self.cache.get(key)
             if base_url is not None:
                 self._base_url = base_url
