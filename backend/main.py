@@ -60,6 +60,7 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 class GetServingUrlHandler(webapp2.RequestHandler):
 
     def normalize_gs_path(self, gs_path, locale):
+        stat_result = None
         gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
         if '{locale}' not in gs_path:
             stat_result = gcs.stat(gs_path[3:])
@@ -82,7 +83,9 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                     return localized_gs_path, stat_result
                 except (gcs.NotFoundError, gcs.ForbiddenError):
                     pass
-        return gs_path.replace('@{locale}', ''), stat_result
+        gs_path = gs_path.replace('@{locale}', '')
+        stat_result = gcs.stat(gs_path[3:])
+        return gs_path, stat_result
 
     def get(self, gs_path):
         gs_path = self.request.get('gs_path') or gs_path
