@@ -56,8 +56,13 @@ class GoogleImage(object):
     @property
     def _data(self):
         if self.__data is None:
-            message = 'Generating Google Cloud Images data -> {}'
-            self.pod.logger.info(message.format(self.bucket_path))
+            if self.locale:
+                message = 'Generating Google Cloud Images data -> {} ({})'
+                message = message.format(self.bucket_path, self.locale)
+            else:
+                message = 'Generating Google Cloud Images data -> {}'
+                message = message.format(self.bucket_path)
+            self.pod.logger.info(message)
             data = get_image_serving_data(self.backend, self.bucket_path,
                                           locale=self.locale)
             self.__data = data
