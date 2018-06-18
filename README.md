@@ -97,6 +97,10 @@ gsutil mb -p <project> gs://<bucket>
 # command grants OWNER access to the service account.
 gsutil defacl ch -u account@example.com:O gs://<bucket>
 
+# If using the web uploader you will also need to grant access to the service
+# account to create objects.
+gsutil acl ch -u account@example.com:O gs://<bucket>
+
 # Ensure that the files are set with `public-read` permissions. URLs generated
 # by the images service respect GCS object permissions so if you intend to serve
 # them publicly, they will need to be `public-read`. Adjust the default ACL with
