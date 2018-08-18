@@ -139,10 +139,23 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                 url += '=s{}'.format(size)
             self.redirect(url)
             return
+        image_metadata = {}
+        try:
+            data = blobstore.fetch_data(blob_key, 0, 50000)
+            image = images.Image(image_data=data)
+            image_metadata = {
+                    'height': image.height,
+                    'width': image.width,
+            }
+        except images.BadImageError:
+            # If the header containing sizes isn't in the first 50000 bytes of the image.
+            # Or, if the file uploaded was just not a real image.
+            logging.exception('Failed to transform image.')
         response_content = json.dumps({
             'content_type': stat_result.content_type,
             'created': stat_result.st_ctime,
             'etag': stat_result.etag,
+            'image_metadata': image_metadata,
             'metadata': stat_result.metadata,
             'size': stat_result.st_size,
             'url': url,
