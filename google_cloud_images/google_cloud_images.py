@@ -71,30 +71,42 @@ class GoogleImage(object):
     @property
     def _cache_key(self):
         if '{locale}' in self.bucket_path:
-            return '{}:{}:{}'.format(self.backend, self.bucket_path, self.locale)
-        return '{}:{}'.format(self.backend, self.bucket_path)
+            return '{}:{}:{}:metadata'.format(self.backend, self.bucket_path, self.locale)
+        return '{}:{}:metadata'.format(self.backend, self.bucket_path)
 
     @property
     def base_url(self):
         """Returns a URL corresponding to the image served by Google's
         image-serving infrastructure."""
         if self._base_url is None:
-            base_url = self.cache.get(self._cache_key)
-            if base_url is not None:
-                self._base_url = base_url
+            image_serving_data = self.cache.get(self._cache_key)
+            if image_serving_data is not None:
+                self._base_url = image_serving_data['url']
             else:
-                self._base_url = self._data.get('url')
-                self.cache.add(self._cache_key, self._base_url)
+                self._base_url = self._data['url']
+                self.cache.add(self._cache_key, self._data)
         return self._base_url
+
+    @property
+    def dimensions(self):
+        return '{}x{}'.format(self.width, self.height)
 
     @property
     def etag(self):
         return self._data['etag']
 
+    @property
+    def height(self):
+        return self._data['image_metadata'].get('height')
+
     def url(self, options=None):
         if not options:
             return self.base_url
         return '{}={}'.format(self.base_url, '-'.join(options))
+
+    @property
+    def width(self):
+        return self._data['image_metadata'].get('width')
 
 
 class GoogleCloudImagesExtension(Extension):
