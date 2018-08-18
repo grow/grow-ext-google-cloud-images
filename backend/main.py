@@ -48,8 +48,6 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
         gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
         action = blobstore.create_upload_url(
                 '/callback', gs_bucket_name=gs_bucket_name)
-        # Support for Cloudflare proxy.
-        action = action.replace('http://', 'https://')
         kwargs = {
             'bucket': gs_bucket_name,
             'action': action,
