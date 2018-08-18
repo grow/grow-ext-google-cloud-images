@@ -56,16 +56,21 @@ class GoogleImage(object):
     @property
     def _data(self):
         if self.__data is None:
-            if self.locale:
-                message = 'Generating Google Cloud Images data -> {} ({})'
-                message = message.format(self.bucket_path, self.locale)
+            image_serving_data = self.cache.get(self._cache_key)
+            if image_serving_data is not None:
+                self.__data = image_serving_data
             else:
-                message = 'Generating Google Cloud Images data -> {}'
-                message = message.format(self.bucket_path)
-            self.pod.logger.info(message)
-            data = get_image_serving_data(self.backend, self.bucket_path,
-                                          locale=self.locale)
-            self.__data = data
+                if self.locale:
+                    message = 'Generating Google Cloud Images data -> {} ({})'
+                    message = message.format(self.bucket_path, self.locale)
+                else:
+                    message = 'Generating Google Cloud Images data -> {}'
+                    message = message.format(self.bucket_path)
+                self.pod.logger.info(message)
+                data = get_image_serving_data(self.backend, self.bucket_path,
+                                              locale=self.locale)
+                self.cache.add(self._cache_key, data)
+                self.__data = data
         return self.__data
 
     @property
@@ -79,12 +84,7 @@ class GoogleImage(object):
         """Returns a URL corresponding to the image served by Google's
         image-serving infrastructure."""
         if self._base_url is None:
-            image_serving_data = self.cache.get(self._cache_key)
-            if image_serving_data is not None:
-                self._base_url = image_serving_data['url']
-            else:
-                self._base_url = self._data['url']
-                self.cache.add(self._cache_key, self._data)
+            self._base_url = self._data['url']
         return self._base_url
 
     @property
