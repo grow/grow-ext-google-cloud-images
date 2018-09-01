@@ -1,6 +1,7 @@
 from jinja2.ext import Extension
 from protorpc import messages
 import grow
+import os
 import jinja2
 import requests
 
@@ -9,7 +10,7 @@ class Error(Exception):
     pass
 
 
-def get_image_serving_data(backend, bucket_path, locale=None):
+def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
@@ -19,6 +20,14 @@ def get_image_serving_data(backend, bucket_path, locale=None):
     try:
         return resp.json()
     except ValueError:
+        if fuzzy_extensions:
+            base, original_ext = os.path.splitext(bucket_path)
+            if original_ext not in ['.jpg', '.png']:
+                raise Error('Fuzzy extensions only supports .png and .jpg files.')
+            new_ext = '.jpg' if original_ext == '.png' else '.png'
+            bucket_path = os.path.join(base, new_ext)
+            logging.info('Trying fuzzy extension -> {}'.format(bucket_path))
+            return get_image_serving_data(backend, bucket_path, locale=locale, fuzzy_extensions=False)
         text = 'An error occurred generating a Google Cloud Images URL for: {}'
         raise Error(text.format(bucket_path))
 
@@ -31,6 +40,7 @@ class GoogleImage(object):
         self.bucket_path = bucket_path
         self._base_url = None
         self._backend = None
+        self._fuzzy_extensions = False
         self._cache = None
         self.__data = None
 
@@ -44,6 +54,14 @@ class GoogleImage(object):
             ident = 'ext-google-cloud-images'
             self._cache = podcache.get_object_cache(ident, write_to_file=True)
         return self._cache
+
+    @property
+    def fuzzy_extensions(self):
+        if self._fuzzy_extensions is None:
+            for preprocessor in self.pod.list_preprocessors():
+                if preprocessor.KIND == GoogleCloudImagesPreprocessor.KIND:
+                    self._fuzzy_extensions = preprocessor.config.fuzzy_extensions
+        return self._backend
 
     @property
     def backend(self):
@@ -60,7 +78,7 @@ class GoogleImage(object):
             if image_serving_data is not None:
                 self.__data = image_serving_data
             else:
-                if self.locale:
+                if self.locale and '{locale}' in self.bucket_path:
                     message = 'Generating Google Cloud Images data -> {} ({})'
                     message = message.format(self.bucket_path, self.locale)
                 else:
@@ -68,7 +86,8 @@ class GoogleImage(object):
                     message = message.format(self.bucket_path)
                 self.pod.logger.info(message)
                 data = get_image_serving_data(self.backend, self.bucket_path,
-                                              locale=self.locale)
+                                              locale=self.locale,
+                                              fuzzy_extensions=self._fuzzy_extensions)
                 self.cache.add(self._cache_key, data)
                 self.__data = data
         return self.__data
