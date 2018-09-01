@@ -34,13 +34,13 @@ def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=N
 
 class GoogleImage(object):
 
-    def __init__(self, pod, bucket_path, locale=None):
+    def __init__(self, pod, bucket_path, locale=None, fuzzy_extensions=False):
         self.pod = pod
         self.locale = locale
         self.bucket_path = bucket_path
         self._base_url = None
         self._backend = None
-        self._fuzzy_extensions = False
+        self._fuzzy_extensions = fuzzy_extensions
         self._cache = None
         self.__data = None
 
@@ -54,14 +54,6 @@ class GoogleImage(object):
             ident = 'ext-google-cloud-images'
             self._cache = podcache.get_object_cache(ident, write_to_file=True)
         return self._cache
-
-    @property
-    def fuzzy_extensions(self):
-        if self._fuzzy_extensions is None:
-            for preprocessor in self.pod.list_preprocessors():
-                if preprocessor.KIND == GoogleCloudImagesPreprocessor.KIND:
-                    self._fuzzy_extensions = preprocessor.config.fuzzy_extensions
-        return self._backend
 
     @property
     def backend(self):
