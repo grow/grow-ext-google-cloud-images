@@ -10,7 +10,7 @@ class Error(Exception):
     pass
 
 
-def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None):
+def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None, logger=None):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
@@ -25,8 +25,9 @@ def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=N
             if original_ext not in ['.jpg', '.png']:
                 raise Error('Fuzzy extensions only supports .png and .jpg files.')
             new_ext = '.jpg' if original_ext == '.png' else '.png'
-            bucket_path = os.path.join(base, new_ext)
-            logging.info('Trying fuzzy extension -> {}'.format(bucket_path))
+            bucket_path = base + new_ext
+            if logger:
+                logger.info('Trying fuzzy extension -> {}'.format(bucket_path))
             return get_image_serving_data(backend, bucket_path, locale=locale, fuzzy_extensions=False)
         text = 'An error occurred generating a Google Cloud Images URL for: {}'
         raise Error(text.format(bucket_path))
@@ -79,7 +80,8 @@ class GoogleImage(object):
                 self.pod.logger.info(message)
                 data = get_image_serving_data(self.backend, self.bucket_path,
                                               locale=self.locale,
-                                              fuzzy_extensions=self._fuzzy_extensions)
+                                              fuzzy_extensions=self._fuzzy_extensions,
+                                              logger=self.pod.logger)
                 self.cache.add(self._cache_key, data)
                 self.__data = data
         return self.__data
@@ -129,7 +131,7 @@ class GoogleCloudImagesExtension(Extension):
 
     @staticmethod
     @jinja2.contextfunction
-    def create_google_image(ctx, bucket_path):
+    def create_google_image(ctx, bucket_path, fuzzy_extensions=False):
         if 'doc' not in ctx:
             raise Exception(
                 'Missing `doc` in the template context. Are'
@@ -137,7 +139,8 @@ class GoogleCloudImagesExtension(Extension):
                 ' import ... with context %}.')
         doc = ctx['doc']
         pod = doc.pod
-        return GoogleImage(pod, bucket_path, locale=doc.locale)
+        return GoogleImage(pod, bucket_path, locale=doc.locale,
+                           fuzzy_extensions=fuzzy_extensions)
 
 
 
