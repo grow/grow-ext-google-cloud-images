@@ -10,6 +10,19 @@ class Error(Exception):
     pass
 
 
+__preprocessor = None
+
+
+def _get_preprocessor(pod):
+    global __preprocessor
+    if __preprocessor:
+        return __preprocessor
+    for preprocessor in pod.list_preprocessors():
+        if preprocessor.KIND == GoogleCloudImagesPreprocessor.KIND:
+            __preprocessor = preprocessor
+            return preprocessor
+
+
 def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None, logger=None):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
@@ -35,9 +48,10 @@ def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=N
 
 class GoogleImage(object):
 
-    def __init__(self, pod, bucket_path, locale=None, fuzzy_extensions=False):
+    def __init__(self, pod, bucket_path, locale=None, original_locale=None, fuzzy_extensions=False):
         self.pod = pod
         self.locale = locale
+        self.original_locale = original_locale
         self.bucket_path = bucket_path
         self._base_url = None
         self._backend = None
@@ -59,9 +73,8 @@ class GoogleImage(object):
     @property
     def backend(self):
         if self._backend is None:
-            for preprocessor in self.pod.list_preprocessors():
-                if preprocessor.KIND == GoogleCloudImagesPreprocessor.KIND:
-                    self._backend = preprocessor.config.backend
+            preprocessor = _get_preprocessor(self.pod)
+            self._backend = preprocessor.config.backend
         return self._backend
 
     @property
@@ -72,8 +85,12 @@ class GoogleImage(object):
                 self.__data = image_serving_data
             else:
                 if self.locale and '{locale}' in self.bucket_path:
-                    message = 'Generating Google Cloud Images data -> {} ({})'
-                    message = message.format(self.bucket_path, self.locale)
+                    if self.locale != self.original_locale:
+                        message = 'Generating Google Cloud Images data -> {} ({} for {})'
+                        message = message.format(self.bucket_path, self.locale, self.original_locale)
+                    else:
+                        message = 'Generating Google Cloud Images data -> {} ({})'
+                        message = message.format(self.bucket_path, self.locale)
                 else:
                     message = 'Generating Google Cloud Images data -> {}'
                     message = message.format(self.bucket_path)
@@ -139,9 +156,21 @@ class GoogleCloudImagesExtension(Extension):
                 ' import ... with context %}.')
         doc = ctx['doc']
         pod = doc.pod
-        return GoogleImage(pod, bucket_path, locale=doc.locale,
+        locale = doc.locale
+        # Supports aliasing one locale to another, for example we can say all
+        # `es_PR` pages should use `en_US` assets.
+        preprocessor = _get_preprocessor(doc.pod)
+        if preprocessor.config.rewrite_locales:
+            for rewrite_locales in preprocessor.config.rewrite_locales:
+                if locale == rewrite_locales.rewrite:
+                    locale = rewrite_locales.to
+        return GoogleImage(pod, bucket_path, locale=locale, original_locale=doc.locale,
                            fuzzy_extensions=fuzzy_extensions)
 
+
+class RewriteLocalesMessage(messages.Message):
+    rewrite = messages.StringField(1)
+    to = messages.StringField(2)
 
 
 class GoogleCloudImagesPreprocessor(grow.Preprocessor):
@@ -150,6 +179,7 @@ class GoogleCloudImagesPreprocessor(grow.Preprocessor):
 
     class Config(messages.Message):
         backend = messages.StringField(1)
+        rewrite_locales = messages.MessageField(RewriteLocalesMessage, 2, repeated=True)
 
     def run(self, *args, **kwargs):
         text = 'Using Google Cloud images backend -> {}'

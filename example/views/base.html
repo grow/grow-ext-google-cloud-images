@@ -1,3 +1,7 @@
 {% set image = google_image('/grow-ext-cloud-images/testdata/grow.png') %}
 {{image.url(['s500', 'cc'])}}
 {{image.etag}}
+
+{% set image = google_image('/grow-ext-cloud-images/testdata/grow@{locale}.png') %}
+{{image.url(['s500', 'cc'])}}
+{{image.etag}}

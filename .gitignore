@@ -3,4 +3,5 @@
 example/.podcache.yaml
 example/build/
 example/extensions/
+example/objectcache.json
 example/podcache.json
