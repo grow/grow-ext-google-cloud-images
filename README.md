@@ -73,6 +73,12 @@ extensions:
 preprocessors:
 - kind: google_cloud_images
   backend: https://gci.grow.io  # URL to backend service.
+
+  # Optional. Allows usage of assets from one locale for another. In the below
+  # example, all `en_AU` pages use `en_GB` assets.
+  rewrite_locales:
+  - rewrite: en_AU
+    to: en_GB
 ```
 
 ### Google Cloud Storage setup
