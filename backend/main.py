@@ -1,17 +1,15 @@
-from google.appengine.ext import vendor
-vendor.add('lib')
-
-from google.appengine.api import app_identity
-from google.appengine.api import images
-from google.appengine.ext import blobstore
-from google.appengine.ext import ndb
-from google.appengine.ext.webapp import blobstore_handlers
-from google.appengine.ext.webapp import template
-import cloudstorage as gcs
 import json
 import logging
 import os
+
+from google.appengine.api import app_identity, images
+
+import cloudstorage as gcs
 import webapp2
+from google.appengine.ext import blobstore, ndb, vendor
+from google.appengine.ext.webapp import blobstore_handlers, template
+
+vendor.add('lib')
 
 
 APPID = app_identity.get_application_id()
@@ -30,7 +28,6 @@ class UploadedImage(ndb.Model):
     path = ndb.StringProperty(repeated=True)
 
 
-
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
 
     def post(self):
@@ -47,7 +44,7 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
         bucket = bucket or BUCKET_NAME
         gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
         action = blobstore.create_upload_url(
-                '/callback', gs_bucket_name=gs_bucket_name)
+            '/callback', gs_bucket_name=gs_bucket_name)
         kwargs = {
             'bucket': gs_bucket_name,
             'action': action,
@@ -63,19 +60,19 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         if '{locale}' not in gs_path:
             stat_result = gcs.stat(gs_path[3:])
             return gs_path, stat_result
-	# Retrieve a localized image if it exists, otherwise strip the locale
+        # Retrieve a localized image if it exists, otherwise strip the locale
         # placeholder from the path and return the base image.
         localized_gs_path = gs_path.replace('{locale}', locale)
-	try:
+        try:
             stat_result = gcs.stat(localized_gs_path[3:])
             return localized_gs_path, stat_result
-	except (gcs.NotFoundError, gcs.ForbiddenError):
+        except (gcs.NotFoundError, gcs.ForbiddenError):
             # If no file exists for the full locale identifier (language and
             # territory), attempt retrieving a file for just the territory.
             if '_' in locale:
                 language, territory = locale.split('_', 1)
-                localized_gs_path = \
-                        gs_path.replace('{locale}', '_{}'.format(territory))
+                localized_gs_path = gs_path.replace(
+                    '{locale}', '_{}'.format(territory))
                 try:
                     stat_result = gcs.stat(localized_gs_path[3:])
                     return localized_gs_path, stat_result
@@ -106,7 +103,8 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             try:
                 images.delete_serving_url(blob_key)
             except images.Error as e:
-                logging.error('Error deleting {} -> {}'.format(gs_path, str(e)))
+                logging.error(
+                    'Error deleting {} -> {}'.format(gs_path, str(e)))
         try:
             url = images.get_serving_url(blob_key, secure_url=True)
         except images.AccessDeniedError:
@@ -144,8 +142,8 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             data = blobstore.fetch_data(blob_key, 0, 50000)
             image = images.Image(image_data=data)
             image_metadata = {
-                    'height': image.height,
-                    'width': image.width,
+                'height': image.height,
+                'width': image.width,
             }
         except images.BadImageError:
             # If the header containing sizes isn't in the first 50000 bytes of the image.
@@ -165,8 +163,8 @@ class GetServingUrlHandler(webapp2.RequestHandler):
 
 
 app = webapp2.WSGIApplication([
-  ('/callback', UploadCallbackHandler),
-  ('/upload/(.*)', UploadHandler),
-  ('/upload', UploadHandler),
-  ('/(.*)', GetServingUrlHandler),
+    ('/callback', UploadCallbackHandler),
+    ('/upload/(.*)', UploadHandler),
+    ('/upload', UploadHandler),
+    ('/(.*)', GetServingUrlHandler),
 ])
