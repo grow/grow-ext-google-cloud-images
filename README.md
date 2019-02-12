@@ -117,6 +117,8 @@ gsutil defacl set public-read gs://<bucket>
 gsutil cp file.jpg gs://<bucket>/<path>/
 ```
 
+NOTE: Ensure the service account has `Storage Admin` permission on the bucket. `Storage Legacy Bucket Owner` is not sufficient. The permissions can be modified from the "Permissions" tab on the [GCS Console](https://console.cloud.google.com/storage/browser/BUCKET/?project=PROJECT).
+
 ### Usage in templates
 
 (WIP)
