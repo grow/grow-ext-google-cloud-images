@@ -3,14 +3,12 @@ import logging
 import os
 
 from google.appengine.api import app_identity, images
+from google.appengine.ext import blobstore, ndb, vendor  # noqa
+from google.appengine.ext.webapp import blobstore_handlers, template
+vendor.add('lib')
 
 import cloudstorage as gcs
 import webapp2
-from google.appengine.ext import blobstore, ndb, vendor
-from google.appengine.ext.webapp import blobstore_handlers, template
-
-vendor.add('lib')
-
 
 APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
@@ -24,8 +22,8 @@ gcs.set_default_retry_params(
 
 
 # TODO: Log uploaded images so they can be reset/deleted by path later.
-class UploadedImage(ndb.Model):
-    path = ndb.StringProperty(repeated=True)
+class ServedImage(ndb.Model):
+    url = ndb.StringProperty()
 
 
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -50,6 +48,30 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
             'action': action,
         }
         self.response.out.write(template.render('upload.html', kwargs))
+
+
+class RedirectHandler(webapp2.RequestHandler):
+    @ndb.toplevel
+    def get(self, gs_path):
+        gs_path = self.request.get('gs_path') or gs_path
+        gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
+        flags = self.request.get('f')
+
+        key = ndb.Key(ServedImage, gs_path)
+        path = key.get()
+
+        if not path:
+            blob_key = blobstore.create_gs_key(gs_path)
+            url = images.get_serving_url(blob_key, secure_url=True)
+            path = ServedImage(key=key, url=url)
+            path.put_async()
+
+        url = path.url
+
+        if flags:
+            url += '={}'.format(flags)
+
+        return webapp2.redirect(str(url), permanent=True)
 
 
 class GetServingUrlHandler(webapp2.RequestHandler):
@@ -85,9 +107,12 @@ class GetServingUrlHandler(webapp2.RequestHandler):
     def get(self, gs_path):
         gs_path = self.request.get('gs_path') or gs_path
         reset_cache = self.request.get('reset_cache')
+        redirect = self.request.get('redirect')
         locale = self.request.get('locale')
+
         service_account_email = \
             '{}@appspot.gserviceaccount.com'.format(APPID)
+
         if not gs_path:
             detail = (
                 'Usage: Share GCS objects with `{}`. Make requests to:'
@@ -97,14 +122,17 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                     os.getenv('HTTP_HOST')))
             self.abort(400, detail=detail)
             return
+
         gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
         blob_key = blobstore.create_gs_key(gs_path)
+
         if reset_cache:
             try:
                 images.delete_serving_url(blob_key)
             except images.Error as e:
                 logging.error(
                     'Error deleting {} -> {}'.format(gs_path, str(e)))
+
         try:
             url = images.get_serving_url(blob_key, secure_url=True)
         except images.AccessDeniedError:
@@ -129,6 +157,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                 ' Cloud Storage: {}'.format(service_account_email))
             self.abort(400, explanation='TransformationError', detail=detail)
             return
+
         # TODO(jeremydw): This is a WIP.
         # Should be updated based on Grow's integration.
         if self.request.get('redirect'):
@@ -137,6 +166,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                 url += '=s{}'.format(size)
             self.redirect(url)
             return
+
         image_metadata = {}
         try:
             data = blobstore.fetch_data(blob_key, 0, 50000)
@@ -166,5 +196,5 @@ app = webapp2.WSGIApplication([
     ('/callback', UploadCallbackHandler),
     ('/upload/(.*)', UploadHandler),
     ('/upload', UploadHandler),
-    ('/(.*)', GetServingUrlHandler),
+    ('/(.*)', RedirectHandler),
 ])
