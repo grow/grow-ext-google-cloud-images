@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import timedelta
 
 from google.appengine.api import app_identity, images
 from google.appengine.ext import blobstore, ndb, vendor  # noqa
@@ -9,6 +10,9 @@ vendor.add('lib')
 
 import cloudstorage as gcs
 import webapp2
+
+from .edge_cache import expires
+
 
 APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
@@ -51,6 +55,7 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 
 class RedirectHandler(webapp2.RequestHandler):
+    @expires(expire_interval=timedelta(days=7))
     @ndb.toplevel
     def get(self, gs_path):
         gs_path = self.request.get('gs_path') or gs_path
