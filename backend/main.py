@@ -11,7 +11,7 @@ vendor.add('lib')
 import cloudstorage as gcs
 import webapp2
 
-from .edge_cache import expires
+from edge_cache import expires
 
 
 APPID = app_identity.get_application_id()
