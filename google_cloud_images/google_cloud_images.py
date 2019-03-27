@@ -159,11 +159,16 @@ class GoogleCloudImagesExtension(Extension):
         locale = doc.locale
         # Supports aliasing one locale to another, for example we can say all
         # `es_PR` pages should use `en_US` assets.
-        preprocessor = _get_preprocessor(doc.pod)
-        if preprocessor.config.rewrite_locales:
-            for rewrite_locales in preprocessor.config.rewrite_locales:
-                if locale == rewrite_locales.rewrite:
-                    locale = rewrite_locales.to
+        # Either pull the locale from a global rewrite from podspec, or pull
+        # from a key `google_cloud_images_locale` on the document.
+        if 'google_cloud_images_locale' in doc.fields and doc.google_cloud_images_locale:
+            locale = doc.google_cloud_images_locale
+        else:
+            preprocessor = _get_preprocessor(doc.pod)
+            if preprocessor.config.rewrite_locales:
+                for rewrite_locales in preprocessor.config.rewrite_locales:
+                    if locale == rewrite_locales.rewrite:
+                        locale = rewrite_locales.to
         return GoogleImage(pod, bucket_path, locale=locale, original_locale=doc.locale,
                            fuzzy_extensions=fuzzy_extensions)
 
