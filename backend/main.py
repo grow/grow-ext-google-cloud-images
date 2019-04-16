@@ -101,65 +101,75 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             self.abort(400, detail=detail)
             return
         gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
-        blob_key = blobstore.create_gs_key(gs_path)
-        if reset_cache:
+
+        # Video handling.
+        if stat_result.content_type.startswith('video'):
+            video_metadata = {}
+            bucket_path = gs_path[3:]
+            url = 'https://storage.googleapis.com{}'.format(bucket_path)
+            response_content = json.dumps({
+                'content_type': stat_result.content_type,
+                'created': stat_result.st_ctime,
+                'etag': stat_result.etag,
+                'image_metadata': video_metadata,
+                'metadata': stat_result.metadata,
+                'size': stat_result.st_size,
+                'url': url,
+            })
+        # Image-handling.
+        else:
+            blob_key = blobstore.create_gs_key(gs_path)
+            if reset_cache:
+                try:
+                    images.delete_serving_url(blob_key)
+                except images.Error as e:
+                    logging.error('Error deleting {} -> {}'.format(gs_path, str(e)))
             try:
-                images.delete_serving_url(blob_key)
-            except images.Error as e:
-                logging.error('Error deleting {} -> {}'.format(gs_path, str(e)))
-        try:
-            url = images.get_serving_url(blob_key, secure_url=True)
-        except images.AccessDeniedError:
-            detail = (
-                'Ensure the following service'
-                ' account has access to the object in Google Cloud Storage:'
-                ' {}'.format(service_account_email))
-            self.abort(400, explanation='AccessDeniedError', detail=detail)
-            return
-        except images.ObjectNotFoundError:
-            detail = (
-                'The object was not found. Ensure the following service'
-                ' account has access to the object in Google Cloud Storage:'
-                ' {}'.format(service_account_email))
-            self.abort(400, explanation='ObjectNotFoundError', detail=detail)
-            return
-        except (images.TransformationError, ValueError):
-            logging.exception('Debugging TransformationError.')
-            detail = (
-                'There was a problem transforming the image. Ensure the'
-                ' following service account has access to the object in Google'
-                ' Cloud Storage: {}'.format(service_account_email))
-            self.abort(400, explanation='TransformationError', detail=detail)
-            return
-        # TODO(jeremydw): This is a WIP.
-        # Should be updated based on Grow's integration.
-        if self.request.get('redirect'):
-            size = self.request.get('size')
-            if size:
-                url += '=s{}'.format(size)
-            self.redirect(url)
-            return
-        image_metadata = {}
-        try:
-            data = blobstore.fetch_data(blob_key, 0, 50000)
-            image = images.Image(image_data=data)
-            image_metadata = {
-                    'height': image.height,
-                    'width': image.width,
-            }
-        except images.BadImageError:
-            # If the header containing sizes isn't in the first 50000 bytes of the image.
-            # Or, if the file uploaded was just not a real image.
-            logging.exception('Failed to transform image.')
-        response_content = json.dumps({
-            'content_type': stat_result.content_type,
-            'created': stat_result.st_ctime,
-            'etag': stat_result.etag,
-            'image_metadata': image_metadata,
-            'metadata': stat_result.metadata,
-            'size': stat_result.st_size,
-            'url': url,
-        })
+                url = images.get_serving_url(blob_key, secure_url=True)
+            except images.AccessDeniedError:
+                detail = (
+                    'Ensure the following service'
+                    ' account has access to the object in Google Cloud Storage:'
+                    ' {}'.format(service_account_email))
+                self.abort(400, explanation='AccessDeniedError', detail=detail)
+                return
+            except images.ObjectNotFoundError:
+                detail = (
+                    'The object was not found. Ensure the following service'
+                    ' account has access to the object in Google Cloud Storage:'
+                    ' {}'.format(service_account_email))
+                self.abort(400, explanation='ObjectNotFoundError', detail=detail)
+                return
+            except (images.TransformationError, ValueError):
+                logging.exception('Debugging TransformationError.')
+                detail = (
+                    'There was a problem transforming the image. Ensure the'
+                    ' following service account has access to the object in Google'
+                    ' Cloud Storage: {}'.format(service_account_email))
+                self.abort(400, explanation='TransformationError', detail=detail)
+                return
+            image_metadata = {}
+            try:
+                data = blobstore.fetch_data(blob_key, 0, 50000)
+                image = images.Image(image_data=data)
+                image_metadata = {
+                        'height': image.height,
+                        'width': image.width,
+                }
+            except images.BadImageError:
+                # If the header containing sizes isn't in the first 50000 bytes of the image.
+                # Or, if the file uploaded was just not a real image.
+                logging.exception('Failed to transform image.')
+            response_content = json.dumps({
+                'content_type': stat_result.content_type,
+                'created': stat_result.st_ctime,
+                'etag': stat_result.etag,
+                'image_metadata': image_metadata,
+                'metadata': stat_result.metadata,
+                'size': stat_result.st_size,
+                'url': url,
+            })
+
         self.response.headers['Content-Type'] = 'application/json'
         self.response.out.write(response_content)
 
