@@ -132,6 +132,18 @@ NOTE: Ensure the service account has `Storage Admin` permission on the bucket. `
 
 # Localized image URL.
 {{google_image("/bucket/folder/path@{locale}.jpg").url()}}
+
+# Object properties.
+{% set image = google_image("/bucket/folder/path.jpg") %}
+{{image.content_type}}
+{{image.created}}
+{{image.dimensions}}
+{{image.etag}}
+{{image.height}}
+{{image.locale}}
+{{image.size}}
+{{image.url()}}
+{{image.width}}
 ```
 
 ## URL options

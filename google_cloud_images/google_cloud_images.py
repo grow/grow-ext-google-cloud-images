@@ -118,6 +118,14 @@ class GoogleImage(object):
         return self._base_url
 
     @property
+    def content_type(self):
+        return self._data['content_type']
+
+    @property
+    def created(self):
+        return self._data['created']
+
+    @property
     def dimensions(self):
         return '{}x{}'.format(self.width, self.height)
 
@@ -128,6 +136,10 @@ class GoogleImage(object):
     @property
     def height(self):
         return self._data['image_metadata'].get('height')
+
+    @property
+    def size(self):
+        return self._data['size']
 
     def url(self, options=None):
         if not options:
