@@ -105,7 +105,17 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         # Video handling.
         if stat_result.content_type.startswith('video'):
             video_metadata = {}
-            bucket_path = gs_path[3:]
+            bucket_path = gs_path[3:]  # bucket/path
+            if bucket_path.endswith('.mp4'):
+                bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
+                clean_etag = stat_result.etag.replace('"', '').replace("'", '')
+                blob_bucket_path = '/{}/blobs/{}.mp4'.format(bucket, clean_etag)
+                try:
+                    stat_result = gcs.stat(blob_bucket_path)
+                    # Use the blob_bucket_path to support obfuscated mp4 files.
+                    bucket_path = blob_bucket_path
+                except (gcs.NotFoundError, gcs.ForbiddenError):
+                    pass
             url = 'https://storage.googleapis.com{}'.format(bucket_path)
             response_content = json.dumps({
                 'content_type': stat_result.content_type,
