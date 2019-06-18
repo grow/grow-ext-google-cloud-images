@@ -107,11 +107,11 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             self.abort(400, detail=detail)
             return
         gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
+        bucket_path = gs_path[3:]  # bucket/path.mp4
 
         # Video handling.
         if gs_path.endswith(BLOB_EXTENSIONS):
             video_metadata = {}
-            bucket_path = gs_path[3:]  # bucket/path.mp4
             ext = gs_path.split('.')[-1]  # mp4
             bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
             clean_etag = stat_result.etag.replace('"', '').replace("'", '')
@@ -160,14 +160,32 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                     ' {}'.format(service_account_email))
                 self.abort(400, explanation='ObjectNotFoundError', detail=detail)
                 return
-            except (images.TransformationError, ValueError):
-                logging.exception('Debugging TransformationError.')
-                detail = (
-                    'There was a problem transforming the image. Ensure the'
-                    ' following service account has access to the object in Google'
-                    ' Cloud Storage: {}'.format(service_account_email))
-                self.abort(400, explanation='TransformationError', detail=detail)
-                return
+            except images.TransformationError:
+                # A TransformationError may happen in several scenarios - if
+                # the file is simply too large for the images service to
+                # handle, if the image service doesn't have access to the file,
+                # or if the file was already uploaded to the image service by
+                # another App Engine app. For the latter case, we can try to
+                # work around that by copying the file and re-uploading it to
+                # the image service.
+
+                copied_bucket_path = bucket_path + '.copy'
+                gcs.copy2(bucket_path, copied_bucket_path)
+                copied_gs_path = '/gs{}'.format(copied_bucket_path)
+                blob_key = blobstore.create_gs_key(copied_gs_path)
+                try:
+                    url = images.get_serving_url(blob_key, secure_url=True)
+                except images.TransformationError:
+                    message = 'Failed to copy file to attempt to fix TransformationError -> {}'
+                    logging.error(message.format(copied_bucket_path))
+                    logging.exception('Debugging TransformationError.')
+                    detail = (
+                        'There was a problem transforming the image. Ensure the'
+                        ' following service account has access to the object in Google'
+                        ' Cloud Storage: {}'.format(service_account_email))
+                    self.abort(400, explanation='TransformationError', detail=detail)
+                    return
+
             image_metadata = {}
             try:
                 data = blobstore.fetch_data(blob_key, 0, 50000)
