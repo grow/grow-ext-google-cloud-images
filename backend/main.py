@@ -18,6 +18,12 @@ APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
 FOLDER = 'grow-ext-cloud-images-uploads'
 
+BLOB_EXTENSIONS = (
+    '.mp4',
+    '.svg',
+    '.webm',
+)
+
 gcs.set_default_retry_params(
     gcs.RetryParams(initial_delay=0.2,
                     max_delay=5.0,
@@ -103,23 +109,23 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
 
         # Video handling.
-        if stat_result.content_type.startswith('video'):
+        if gs_path.endswith(BLOB_EXTENSIONS):
             video_metadata = {}
-            bucket_path = gs_path[3:]  # bucket/path
-            if bucket_path.endswith('.mp4'):
-                bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
-                clean_etag = stat_result.etag.replace('"', '').replace("'", '')
-                blob_bucket_path = '/{}/blobs/{}.mp4'.format(bucket, clean_etag)
-                try:
-                    stat_result = gcs.stat(blob_bucket_path)
-                    # Use the blob_bucket_path to support obfuscated mp4 files.
-                    bucket_path = blob_bucket_path
-                except gcs.NotFoundError:
-                    # Copy file to blob path.
-                    gcs.copy2(bucket_path, blob_bucket_path)
-                    bucket_path = blob_bucket_path
-                except gcs.ForbiddenError:
-                    pass
+            bucket_path = gs_path[3:]  # bucket/path.mp4
+            ext = gs_path.split('.')[-1]  # mp4
+            bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
+            clean_etag = stat_result.etag.replace('"', '').replace("'", '')
+            blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, clean_etag, ext)
+            try:
+                stat_result = gcs.stat(blob_bucket_path)
+                # Use the blob_bucket_path to support obfuscated mp4 files.
+                bucket_path = blob_bucket_path
+            except gcs.NotFoundError:
+                # Copy file to blob path.
+                gcs.copy2(bucket_path, blob_bucket_path)
+                bucket_path = blob_bucket_path
+            except gcs.ForbiddenError:
+                pass
             url = 'https://storage.googleapis.com{}'.format(bucket_path)
             response_content = json.dumps({
                 'content_type': stat_result.content_type,
