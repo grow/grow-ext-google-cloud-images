@@ -18,7 +18,16 @@ APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
 FOLDER = 'grow-ext-cloud-images-uploads'
 
+IMAGE_EXTENSIONS = (
+    '.gif',
+    '.jpeg',
+    '.jpg',
+    '.png',
+    '.webp',
+)
+
 BLOB_EXTENSIONS = (
+    '.json',
     '.mp4',
     '.svg',
     '.webm',
@@ -109,35 +118,8 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         gs_path, stat_result = self.normalize_gs_path(gs_path, locale)
         bucket_path = gs_path[3:]  # bucket/path.mp4
 
-        # Video handling.
-        if gs_path.endswith(BLOB_EXTENSIONS):
-            video_metadata = {}
-            ext = gs_path.split('.')[-1]  # mp4
-            bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
-            clean_etag = stat_result.etag.replace('"', '').replace("'", '')
-            blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, clean_etag, ext)
-            try:
-                stat_result = gcs.stat(blob_bucket_path)
-                # Use the blob_bucket_path to support obfuscated mp4 files.
-                bucket_path = blob_bucket_path
-            except gcs.NotFoundError:
-                # Copy file to blob path.
-                gcs.copy2(bucket_path, blob_bucket_path)
-                bucket_path = blob_bucket_path
-            except gcs.ForbiddenError:
-                pass
-            url = 'https://storage.googleapis.com{}'.format(bucket_path)
-            response_content = json.dumps({
-                'content_type': stat_result.content_type,
-                'created': stat_result.st_ctime,
-                'etag': stat_result.etag,
-                'image_metadata': video_metadata,
-                'metadata': stat_result.metadata,
-                'size': stat_result.st_size,
-                'url': url,
-            })
         # Image-handling.
-        else:
+        if gs_path.endswith(IMAGE_EXTENSIONS):
             blob_key = blobstore.create_gs_key(gs_path)
             if reset_cache:
                 try:
@@ -203,6 +185,34 @@ class GetServingUrlHandler(webapp2.RequestHandler):
                 'created': stat_result.st_ctime,
                 'etag': stat_result.etag,
                 'image_metadata': image_metadata,
+                'metadata': stat_result.metadata,
+                'size': stat_result.st_size,
+                'url': url,
+            })
+
+        # Video handling.
+        else:
+            video_metadata = {}
+            ext = gs_path.split('.')[-1]  # mp4
+            bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
+            clean_etag = stat_result.etag.replace('"', '').replace("'", '')
+            blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, clean_etag, ext)
+            try:
+                stat_result = gcs.stat(blob_bucket_path)
+                # Use the blob_bucket_path to support obfuscated mp4 files.
+                bucket_path = blob_bucket_path
+            except gcs.NotFoundError:
+                # Copy file to blob path.
+                gcs.copy2(bucket_path, blob_bucket_path)
+                bucket_path = blob_bucket_path
+            except gcs.ForbiddenError:
+                pass
+            url = 'https://storage.googleapis.com{}'.format(bucket_path)
+            response_content = json.dumps({
+                'content_type': stat_result.content_type,
+                'created': stat_result.st_ctime,
+                'etag': stat_result.etag,
+                'image_metadata': video_metadata,
                 'metadata': stat_result.metadata,
                 'size': stat_result.st_size,
                 'url': url,
