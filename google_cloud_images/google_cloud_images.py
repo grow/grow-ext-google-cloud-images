@@ -23,7 +23,14 @@ def _get_preprocessor(pod):
             return preprocessor
 
 
-def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None, logger=None):
+def get_placeholder(bucket_path, placeholders):
+    _, ext = os.path.splitext(bucket_path)
+    if ext not in placeholders:
+        raise Error('No placeholder found for GCS path -> {}'.format(bucket_path))
+    return placeholders.get(ext)
+
+
+def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=None, logger=None, placeholders=None, is_placeholder=False):
     """Makes a request to the backend microservice capable of generating URLs
     that use Google's image-serving infrastructure."""
     params = {'gs_path': bucket_path}
@@ -31,7 +38,7 @@ def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=N
         params['locale'] = locale
     resp = requests.get(backend, params)
     try:
-        return resp.json()
+        return resp.json(), not is_placeholder
     except ValueError:
         if fuzzy_extensions:
             base, original_ext = os.path.splitext(bucket_path)
@@ -41,7 +48,12 @@ def get_image_serving_data(backend, bucket_path, locale=None, fuzzy_extensions=N
             bucket_path = base + new_ext
             if logger:
                 logger.info('Trying fuzzy extension -> {}'.format(bucket_path))
-            return get_image_serving_data(backend, bucket_path, locale=locale, fuzzy_extensions=False)
+            return get_image_serving_data(backend, bucket_path, locale=locale, fuzzy_extensions=False, logger=logger, placeholders=placeholders)
+        if placeholders:
+            if logger:
+                logger.warning('Error with Google Cloud Images URL (using placeholder instead) -> {}'.format(bucket_path))
+            placeholder_path = get_placeholder(bucket_path, placeholders)
+            return get_image_serving_data(backend, placeholder_path, locale=locale, fuzzy_extensions=False, logger=logger, is_placeholder=True)
         text = 'An error occurred generating a Google Cloud Images URL for: {}'
         raise Error(text.format(bucket_path))
 
@@ -55,6 +67,7 @@ class GoogleImage(object):
         self.bucket_path = bucket_path
         self._base_url = None
         self._backend = None
+        self._placeholders = None
         self._fuzzy_extensions = fuzzy_extensions
         self._cache = None
         self.__data = None
@@ -69,6 +82,13 @@ class GoogleImage(object):
             ident = 'ext-google-cloud-images'
             self._cache = podcache.get_object_cache(ident, write_to_file=True)
         return self._cache
+
+    @property
+    def placeholders(self):
+        if self._placeholders is None:
+            preprocessor = _get_preprocessor(self.pod)
+            self._placeholders = preprocessor.extensions_to_placeholders
+        return self._placeholders
 
     @property
     def backend(self):
@@ -95,11 +115,13 @@ class GoogleImage(object):
                     message = 'Generating Google Cloud Images data -> {}'
                     message = message.format(self.bucket_path)
                 self.pod.logger.info(message)
-                data = get_image_serving_data(self.backend, self.bucket_path,
+                data, use_cache = get_image_serving_data(self.backend, self.bucket_path,
                                               locale=self.locale,
                                               fuzzy_extensions=self._fuzzy_extensions,
-                                              logger=self.pod.logger)
-                self.cache.add(self._cache_key, data)
+                                              logger=self.pod.logger,
+                                              placeholders=self.placeholders)
+                if use_cache:
+                    self.cache.add(self._cache_key, data)
                 self.__data = data
         return self.__data
 
@@ -190,15 +212,26 @@ class RewriteLocalesMessage(messages.Message):
     to = messages.StringField(2)
 
 
-class GoogleCloudImagesPreprocessor(grow.Preprocessor):
+class PlaceholderMessage(messages.Message):
+    extensions = messages.StringField(1, repeated=True)
+    path = messages.StringField(2)
 
+
+class GoogleCloudImagesPreprocessor(grow.Preprocessor):
     KIND = 'google_cloud_images'
+    extensions_to_placeholders = None
 
     class Config(messages.Message):
         backend = messages.StringField(1)
         rewrite_locales = messages.MessageField(RewriteLocalesMessage, 2, repeated=True)
+        placeholders = messages.MessageField(PlaceholderMessage, 3, repeated=True)
 
     def run(self, *args, **kwargs):
         text = 'Using Google Cloud images backend -> {}'
         message = text.format(self.config.backend)
         self.pod.logger.info(message)
+        if self.config.placeholders:
+            self.extensions_to_placeholders = {}
+            for placeholder in self.config.placeholders:
+                for ext in placeholder.extensions:
+                    self.extensions_to_placeholders[ext] = placeholder.path
