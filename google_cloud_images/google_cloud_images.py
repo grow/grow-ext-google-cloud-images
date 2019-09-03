@@ -87,7 +87,7 @@ class GoogleImage(object):
     def placeholders(self):
         if self._placeholders is None:
             preprocessor = _get_preprocessor(self.pod)
-            self._placeholders = preprocessor.extensions_to_placeholders
+            self._placeholders = preprocessor.extensions_to_placeholders()
         return self._placeholders
 
     @property
@@ -219,7 +219,7 @@ class PlaceholderMessage(messages.Message):
 
 class GoogleCloudImagesPreprocessor(grow.Preprocessor):
     KIND = 'google_cloud_images'
-    extensions_to_placeholders = None
+    _extensions_to_placeholders = None
 
     class Config(messages.Message):
         backend = messages.StringField(1)
@@ -230,8 +230,12 @@ class GoogleCloudImagesPreprocessor(grow.Preprocessor):
         text = 'Using Google Cloud images backend -> {}'
         message = text.format(self.config.backend)
         self.pod.logger.info(message)
-        if self.config.placeholders:
-            self.extensions_to_placeholders = {}
-            for placeholder in self.config.placeholders:
-                for ext in placeholder.extensions:
-                    self.extensions_to_placeholders[ext] = placeholder.path
+
+    def extensions_to_placeholders(self):
+        if self._extensions_to_placeholders is None:
+            self._extensions_to_placeholders = {}
+            if self.config.placeholders:
+                for placeholder in self.config.placeholders:
+                    for ext in placeholder.extensions:
+                        self._extensions_to_placeholders[ext] = placeholder.path
+        return self._extensions_to_placeholders
