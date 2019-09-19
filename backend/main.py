@@ -10,6 +10,7 @@ from google.appengine.ext.webapp import template
 import cloudstorage as gcs
 import json
 import logging
+import mimetypes
 import os
 import webapp2
 
@@ -199,10 +200,16 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, clean_etag, ext)
             url = 'https://storage.googleapis.com{}'.format(blob_bucket_path)
             original_bucket_path = bucket_path
+            if bucket_path.endswith('.svg'):
+                mimetype = 'image/svg+xml'
+            else:
+                mimetype = mimetypes.guess_type(bucket_path)[0]
             metadata = {
                 'x-goog-meta-optimized': 'true',
                 'x-goog-meta-url': url,
             }
+            if mimetype:
+                metadata.update({'content-type': mimetype})
             try:
                 stat_result = gcs.stat(blob_bucket_path)
                 # Use the blob_bucket_path to support obfuscated mp4 files.
