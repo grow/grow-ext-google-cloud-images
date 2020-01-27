@@ -1,1 +1,3 @@
-from google_cloud_images import *
+from .google_cloud_images import GoogleCloudImagesExtension
+from .google_cloud_images import GoogleCloudImagesPreprocessor
+from .google_cloud_images import GoogleImage
