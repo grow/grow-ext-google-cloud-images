@@ -54,7 +54,12 @@ class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
         blob_info = uploaded_files[0]
         blob_key = blob_info.key()
         url = images.get_serving_url(blob_key, secure_url=True)
-        self.redirect(url)
+        resp = json.dumps({
+            'url': url,
+        })
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.out.write(resp)
 
 
 class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -69,6 +74,20 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
             'action': action,
         }
         self.response.out.write(template.render('upload.html', kwargs))
+
+
+class CreateUploadUrlHandler(webapp2.RequestHandler):
+
+    def get(self):
+        gs_bucket_name = '{}/{}'.format(BUCKET_NAME, FOLDER)
+        upload_url = blobstore.create_upload_url(
+                '/callback', gs_bucket_name=gs_bucket_name)
+        resp = json.dumps({
+            'upload_url': upload_url
+        })
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.out.write(resp)
 
 
 class GetServingUrlHandler(webapp2.RequestHandler):
@@ -240,5 +259,6 @@ app = webapp2.WSGIApplication([
   ('/callback', UploadCallbackHandler),
   ('/upload/(.*)', UploadHandler),
   ('/upload', UploadHandler),
+  ('/_api/create_upload_url', CreateUploadUrlHandler),
   ('/(.*)', GetServingUrlHandler),
 ])
