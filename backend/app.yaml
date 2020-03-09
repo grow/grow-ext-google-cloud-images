@@ -4,6 +4,15 @@ runtime: python27
 threadsafe: yes
 instance_class: F4_1G
 
+env_variables:
+  GAE_USE_SOCKETS_HTTPLIB: 'anyvalue'
+
+libraries:
+- name: ssl
+  version: latest
+- name: pycrypto
+  version: latest
+
 handlers:
 - url: .*
   script: main.app

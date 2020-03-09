@@ -16,5 +16,6 @@ deploy:
 	gcloud app deploy \
 		-q \
 		--project=$(project) \
+		--version=auto \
 		--promote \
 		app.yaml

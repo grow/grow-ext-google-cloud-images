@@ -11,6 +11,7 @@ import cloudstorage as gcs
 import json
 import logging
 import mimetypes
+import requests
 import os
 import webapp2
 
@@ -18,6 +19,11 @@ import webapp2
 APPID = app_identity.get_application_id()
 BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
 FOLDER = 'grow-ext-cloud-images-uploads'
+
+SCOPE = [
+    'https://www.googleapis.com/auth/cloud-platform',
+    'https://www.googleapis.com/auth/iam',
+]
 
 IMAGE_EXTENSIONS = (
     '.gif',
@@ -84,6 +90,24 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
                 '/callback', gs_bucket_name=gs_bucket_name)
         resp = json.dumps({
             'upload_url': upload_url
+        })
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.out.write(resp)
+
+
+class UploadFileOnServerHandler(webapp2.RequestHandler):
+
+    def post(self):
+        uploaded_content = self.request.POST.multi['file'].file.read()
+        uploaded_name = self.request.POST.multi['file'].filename
+        gs_path = '/{}/{}'.format(BUCKET_NAME, FOLDER, '{}_{}'.format(uploaded_name, os.getenv('REQUEST_ID_HASH')))
+        with gcs.open(gs_path, 'w') as fp:
+            fp.write(uploaded_content)
+        blob_key = blobstore.create_gs_key('/gs{}'.format(gs_path))
+        serving_url = images.get_serving_url(blob_key, secure_url=True)
+        resp = json.dumps({
+            'url': serving_url,
         })
         self.response.headers['Content-Type'] = 'application/json'
         self.response.headers['Access-Control-Allow-Origin'] = '*'
@@ -260,5 +284,6 @@ app = webapp2.WSGIApplication([
   ('/upload/(.*)', UploadHandler),
   ('/upload', UploadHandler),
   ('/_api/create_upload_url', CreateUploadUrlHandler),
+  ('/_api/upload_file', UploadFileOnServerHandler),
   ('/(.*)', GetServingUrlHandler),
 ])
