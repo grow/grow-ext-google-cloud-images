@@ -101,7 +101,7 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
     def post(self):
         uploaded_content = self.request.POST.multi['file'].file.read()
         uploaded_name = self.request.POST.multi['file'].filename
-        gs_path = '/{}/{}'.format(BUCKET_NAME, FOLDER, '{}_{}'.format(uploaded_name, os.getenv('REQUEST_ID_HASH')))
+        gs_path = '/{}/{}/{}'.format(BUCKET_NAME, FOLDER, '{}_{}'.format(uploaded_name, os.getenv('REQUEST_ID_HASH')))
         with gcs.open(gs_path, 'w') as fp:
             fp.write(uploaded_content)
         blob_key = blobstore.create_gs_key('/gs{}'.format(gs_path))
