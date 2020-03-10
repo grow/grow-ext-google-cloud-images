@@ -101,14 +101,41 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
     def post(self):
         uploaded_content = self.request.POST.multi['file'].file.read()
         uploaded_name = self.request.POST.multi['file'].filename
-        gs_path = '/{}/{}/{}'.format(BUCKET_NAME, FOLDER, '{}_{}'.format(uploaded_name, os.getenv('REQUEST_ID_HASH')))
-        with gcs.open(gs_path, 'w') as fp:
+        name, ext = os.path.splitext(uploaded_name)
+        hashed_name = '{}_{}{}'.format(name, os.getenv('REQUEST_ID_HASH'), ext)
+        gs_path = '/{}/{}/{}'.format(BUCKET_NAME, FOLDER, hashed_name)
+        if hashed_name.endswith('.svg'):
+            mimetype = 'image/svg+xml'
+        else:
+            mimetype = mimetypes.guess_type(hashed_name)[0]
+        options = {
+            'x-goog-acl': 'public-read',
+        }
+        with gcs.open(gs_path, 'w', content_type=mimetype, options=options) as fp:
             fp.write(uploaded_content)
         blob_key = blobstore.create_gs_key('/gs{}'.format(gs_path))
-        serving_url = images.get_serving_url(blob_key, secure_url=True)
-        resp = json.dumps({
-            'url': serving_url,
-        })
+
+        if gs_path.endswith(IMAGE_EXTENSIONS):
+            serving_url = images.get_serving_url(blob_key, secure_url=True)
+            result = {'url': serving_url}
+            try:
+                data = blobstore.fetch_data(blob_key, 0, 50000)
+                image = images.Image(image_data=data)
+                result.update({
+                    'gs_path': gs_path,
+                    'height': image.height,
+                    'width': image.width,
+                })
+            except images.BadImageError:
+                # If the header containing sizes isn't in the first 50000 bytes of the image.
+                # Or, if the file uploaded was just not a real image.
+                logging.exception('Failed to transform image.')
+        else:
+            serving_url = 'https://storage.googleapis.com{}'.format(gs_path)
+            result = {
+                'url': serving_url,
+            }
+        resp = json.dumps(result)
         self.response.headers['Content-Type'] = 'application/json'
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.out.write(resp)
