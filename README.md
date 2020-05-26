@@ -56,6 +56,24 @@ w100-h300-c-pp-l100-rj
 
 ## Usage
 
+### Microservice setup
+
+The extension requires a microservice to upload the images to Google Cloud Storage and create the dynamic image service URLs.  We recommend each project (or organization) set up their own instance of the microservice.
+
+Clone this repository, then follow these steps.
+
+```
+cd backend
+make install
+make project=GOOGLE_CLOUD_PROJECT_ID deploy
+
+# If using the default configuration, ensure the bucket is publicly readable by default.
+# A different bucket can be used by editing `BUCKET_NAME` in `main.py`.
+gsutil defacl set public-read gs://APPID.appspot.com
+```
+
+Once deployed, you will receive a URL like `https://ext-cloud-images-dot-APPID.appspot.com`. This is the backend service URL used in the next step.
+
 ### Grow setup
 
 1. Create an `extensions.txt` file within your pod.
@@ -72,7 +90,9 @@ extensions:
 
 preprocessors:
 - kind: google_cloud_images
-  backend: https://gci.grow.io  # URL to backend service.
+  backend: `<insert the backend URL from the microservice step>`
+  # NOTE: We run an instance at https://ext-cloud-images-dot-grow-prod.appspot.com/
+  # but we recommend you deploy your own instance, and just use ours for testing.
 
   # Optional. Allows usage of assets from one locale for another. In the below
   # example, all `en_AU` pages use `en_GB` assets.
