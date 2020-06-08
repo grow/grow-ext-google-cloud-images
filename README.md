@@ -91,7 +91,7 @@ extensions:
 preprocessors:
 - kind: google_cloud_images
   backend: `<insert the backend URL from the microservice step>`
-  # NOTE: We run an instance at https://ext-cloud-images-dot-grow-prod.appspot.com/
+  # NOTE: We run an instance at https://gci.grow.io/
   # but we recommend you deploy your own instance, and just use ours for testing.
 
   # Optional. Allows usage of assets from one locale for another. In the below
