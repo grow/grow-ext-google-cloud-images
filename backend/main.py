@@ -13,6 +13,7 @@ import logging
 import mimetypes
 import requests
 import os
+import uuid
 import webapp2
 
 
@@ -266,8 +267,8 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             video_metadata = {}
             ext = gs_path.split('.')[-1]  # mp4
             bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
-            clean_etag = stat_result.etag.replace('"', '').replace("'", '')
-            blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, clean_etag, ext)
+            basename = str(uuid.uuid4())
+            blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, basename, ext)
             url = 'https://storage.googleapis.com{}'.format(blob_bucket_path)
             original_bucket_path = bucket_path
             if bucket_path.endswith('.svg'):
