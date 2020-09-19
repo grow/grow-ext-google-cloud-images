@@ -41,6 +41,11 @@ BLOB_EXTENSIONS = (
     '.webm',
 )
 
+PUBLIC_PATTERNS = (
+    '/images/',  # Typically used for Lottie files, which have dependencies.
+    'public',  # Any bucket path containing "public" is considered public.
+)
+
 gcs.set_default_retry_params(
     gcs.RetryParams(initial_delay=0.2,
                     max_delay=5.0,
@@ -144,6 +149,13 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
 
 class GetServingUrlHandler(webapp2.RequestHandler):
 
+    def test_is_public(self, gs_path):
+        is_public = False
+        for pattern in PUBLIC_PATTERNS:
+            if pattern in gs_path:
+                is_public = True
+        return is_public
+
     def normalize_gs_path(self, gs_path, locale):
         stat_result = None
         gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
@@ -176,6 +188,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         gs_path = self.request.get('gs_path') or gs_path
         reset_cache = self.request.get('reset_cache')
         locale = self.request.get('locale')
+        update_acl = self.request.get('update_acl')
         service_account_email = \
             '{}@appspot.gserviceaccount.com'.format(APPID)
         if not gs_path:
@@ -281,6 +294,9 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             }
             if mimetype:
                 metadata.update({'content-type': mimetype})
+            if update_acl:
+                if self.test_is_public(gs_path):
+                    metadata.update({'x-goog-acl': update_acl})
             try:
                 stat_result = gcs.stat(blob_bucket_path)
                 # Use the blob_bucket_path to support obfuscated mp4 files.
