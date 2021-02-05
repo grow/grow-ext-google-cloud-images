@@ -85,8 +85,9 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class CreateUploadUrlHandler(webapp2.RequestHandler):
 
-    def get(self):
-        gs_bucket_name = '{}/{}'.format(BUCKET_NAME, FOLDER)
+    def get(self, bucket=None):
+        bucket = bucket or BUCKET_NAME
+        gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
         upload_url = blobstore.create_upload_url(
                 '/callback', gs_bucket_name=gs_bucket_name)
         resp = json.dumps({
@@ -311,6 +312,7 @@ app = webapp2.WSGIApplication([
   ('/callback', UploadCallbackHandler),
   ('/upload/(.*)', UploadHandler),
   ('/upload', UploadHandler),
+  ('/_api/create_upload_url/(.*)', CreateUploadUrlHandler),
   ('/_api/create_upload_url', CreateUploadUrlHandler),
   ('/_api/upload_file', UploadFileOnServerHandler),
   ('/(.*)', GetServingUrlHandler),
