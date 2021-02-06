@@ -100,12 +100,13 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
 
 class UploadFileOnServerHandler(webapp2.RequestHandler):
 
-    def post(self):
+    def post(self, bucket=None):
+        bucket = bucket or BUCKET_NAME
         uploaded_content = self.request.POST.multi['file'].file.read()
         uploaded_name = self.request.POST.multi['file'].filename
         name, ext = os.path.splitext(uploaded_name)
         hashed_name = '{}_{}{}'.format(name, os.getenv('REQUEST_ID_HASH'), ext)
-        gs_path = '/{}/{}/{}'.format(BUCKET_NAME, FOLDER, hashed_name)
+        gs_path = '/{}/{}/{}'.format(bucket, FOLDER, hashed_name)
         if hashed_name.endswith('.svg'):
             mimetype = 'image/svg+xml'
         else:
@@ -314,6 +315,7 @@ app = webapp2.WSGIApplication([
   ('/upload', UploadHandler),
   ('/_api/create_upload_url/(.*)', CreateUploadUrlHandler),
   ('/_api/create_upload_url', CreateUploadUrlHandler),
+  ('/_api/upload_file/(.*)', UploadFileOnServerHandler),
   ('/_api/upload_file', UploadFileOnServerHandler),
   ('/(.*)', GetServingUrlHandler),
 ])
