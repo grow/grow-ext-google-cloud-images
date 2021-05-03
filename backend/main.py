@@ -278,6 +278,7 @@ class GetServingUrlHandler(webapp2.RequestHandler):
             else:
                 mimetype = mimetypes.guess_type(bucket_path)[0]
             metadata = {
+                'Cache-Control': 'max-age=31536000',
                 'x-goog-meta-optimized': 'true',
                 'x-goog-meta-url': url,
             }
