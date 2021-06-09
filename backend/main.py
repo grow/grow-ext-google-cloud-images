@@ -103,7 +103,7 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
     def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Methods'] = 'POST'
-        self.response.headers['Access-Control-Max-Age'] = 86400
+        self.response.headers['Access-Control-Max-Age'] = '86400'
 
     def post(self, bucket=None):
         bucket = bucket or BUCKET_NAME
