@@ -100,7 +100,7 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
 
 class UploadFileOnServerHandler(webapp2.RequestHandler):
 
-    def options(self, bucket=None):
+    def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Methods'] = 'POST'
         self.response.headers['Access-Control-Max-Age'] = 86400
