@@ -91,7 +91,7 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 class CreateUploadUrlHandler(webapp2.RequestHandler):
 
     def options(self):
-        add_cors_headers(self.response)
+        add_cors_headers(self.response, 'GET')
 
     def get(self, bucket=None):
         bucket = bucket or BUCKET_NAME
