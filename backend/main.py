@@ -53,6 +53,11 @@ class UploadedImage(ndb.Model):
     path = ndb.StringProperty(repeated=True)
 
 
+def add_cors_headers(response, methods='POST'):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = methods
+    response.headers['Access-Control-Max-Age'] = '86400'
+
 
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
 
@@ -85,6 +90,9 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class CreateUploadUrlHandler(webapp2.RequestHandler):
 
+    def options(self):
+        add_cors_headers(self.response, 'GET')
+
     def get(self, bucket=None):
         bucket = bucket or BUCKET_NAME
         gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
@@ -99,6 +107,9 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
 
 
 class UploadFileOnServerHandler(webapp2.RequestHandler):
+
+    def options(self):
+        add_cors_headers(self.response)
 
     def post(self, bucket=None):
         bucket = bucket or BUCKET_NAME
