@@ -100,6 +100,11 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
 
 class UploadFileOnServerHandler(webapp2.RequestHandler):
 
+    def options(self, bucket=None):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST'
+        self.response.headers['Access-Control-Max-Age'] = 86400
+
     def post(self, bucket=None):
         bucket = bucket or BUCKET_NAME
         uploaded_content = self.request.POST.multi['file'].file.read()
