@@ -53,12 +53,6 @@ class UploadedImage(ndb.Model):
     path = ndb.StringProperty(repeated=True)
 
 
-def add_cors_headers(response, methods='POST'):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = methods
-    response.headers['Access-Control-Max-Age'] = '86400'
-
-
 class UploadCallbackHandler(blobstore_handlers.BlobstoreUploadHandler):
 
     def post(self):
@@ -90,9 +84,6 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class CreateUploadUrlHandler(webapp2.RequestHandler):
 
-    def options(self):
-        add_cors_headers(self.response, 'GET')
-
     def get(self, bucket=None):
         bucket = bucket or BUCKET_NAME
         gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
@@ -102,19 +93,24 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
             'upload_url': upload_url
         })
         self.response.headers['Content-Type'] = 'application/json'
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.out.write(resp)
 
 
 class UploadFileOnServerHandler(webapp2.RequestHandler):
 
-    def options(self):
-        add_cors_headers(self.response)
-
     def post(self, bucket=None):
         bucket = bucket or BUCKET_NAME
-        uploaded_content = self.request.POST.multi['file'].file.read()
-        uploaded_name = self.request.POST.multi['file'].filename
+        try:
+            uploaded_content = self.request.POST.multi['file'].file.read()
+            uploaded_name = self.request.POST.multi['file'].filename
+        except KeyError as e:
+            resp = json.dumps({
+                'error': str(e)
+            })
+            self.response.set_status(400)
+            self.response.headers['Content-Type'] = 'application/json'
+            self.response.out.write(resp)
+            return
         name, ext = os.path.splitext(uploaded_name)
         hashed_name = '{}_{}{}'.format(name, os.getenv('REQUEST_ID_HASH'), ext)
         gs_path = '/{}/{}/{}'.format(bucket, FOLDER, hashed_name)
@@ -151,7 +147,6 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
             }
         resp = json.dumps(result)
         self.response.headers['Content-Type'] = 'application/json'
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.out.write(resp)
 
 
@@ -321,7 +316,32 @@ class GetServingUrlHandler(webapp2.RequestHandler):
         self.response.out.write(response_content)
 
 
-app = webapp2.WSGIApplication([
+def CorsMiddleware(app):
+
+    def _set_headers(headers):
+        headers.append(('Access-Control-Allow-Origin', '*'))
+        headers.append(('Access-Control-Allow-Methods', '*'))
+        headers.append(('Access-Control-Allow-Headers', 'origin, content-type, accept'))
+        return headers
+
+    def middleware(environ, start_response):
+        if environ.get('REQUEST_METHOD') == 'OPTIONS':
+            headers = []
+            headers = _set_headers(headers)
+            start_response('200 OK', headers)
+            return []
+
+        def headers_start_response(status, headers, *args, **kwargs):
+            all_headers = [key.lower() for key, val in headers]
+            if 'access-control-allow-origin' not in all_headers:
+                headers = _set_headers(headers)
+            return start_response(status, headers, *args, **kwargs)
+        return app(environ, headers_start_response)
+
+    return middleware
+
+
+app = CorsMiddleware(webapp2.WSGIApplication([
   ('/callback', UploadCallbackHandler),
   ('/upload/(.*)', UploadHandler),
   ('/upload', UploadHandler),
@@ -330,4 +350,4 @@ app = webapp2.WSGIApplication([
   ('/_api/upload_file/(.*)', UploadFileOnServerHandler),
   ('/_api/upload_file', UploadFileOnServerHandler),
   ('/(.*)', GetServingUrlHandler),
-])
+]))
