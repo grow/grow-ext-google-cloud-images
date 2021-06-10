@@ -103,7 +103,7 @@ class CreateUploadUrlHandler(webapp2.RequestHandler):
             'upload_url': upload_url
         })
         self.response.headers['Content-Type'] = 'application/json'
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        add_cors_headers(self.response, 'GET')
         self.response.out.write(resp)
 
 
@@ -151,8 +151,8 @@ class UploadFileOnServerHandler(webapp2.RequestHandler):
                 'url': serving_url,
             }
         resp = json.dumps(result)
+        add_cors_headers(self.response)
         self.response.headers['Content-Type'] = 'application/json'
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.out.write(resp)
 
 
