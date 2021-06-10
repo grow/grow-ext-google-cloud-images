@@ -56,7 +56,7 @@ class UploadedImage(ndb.Model):
 def add_cors_headers(response, methods='POST', headers=None):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = methods
-    response.headers['Access-Control-Allow-Headers'] = headers or 'Content-Type, Accept'
+    response.headers['Access-Control-Allow-Headers'] = headers or '*'
     response.headers['Access-Control-Max-Age'] = '86400'
 
 
