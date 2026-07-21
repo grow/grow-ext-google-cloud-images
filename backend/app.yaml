@@ -1,18 +1,11 @@
 service: ext-cloud-images
-api_version: 1
-runtime: python27
-threadsafe: yes
+runtime: python312
 instance_class: F4_1G
 
-env_variables:
-  GAE_USE_SOCKETS_HTTPLIB: 'anyvalue'
+app_engine_apis: true
 
-libraries:
-- name: ssl
-  version: latest
-- name: pycrypto
-  version: latest
+entrypoint: gunicorn -b :$PORT -w 2 main:app
 
 handlers:
-- url: .*
-  script: main.app
+  - url: .*
+    script: auto

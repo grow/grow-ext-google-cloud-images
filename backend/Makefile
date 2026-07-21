@@ -1,10 +1,11 @@
 $project :=
 
 install:
-	pip install -r requirements.txt -t lib
+	python3 -m venv env
+	./env/bin/pip install -r requirements.txt
 
 run:
-	dev_appserver.py app.yaml
+	./env/bin/gunicorn -b :8080 main:app
 
 deploy-dispatch:
 	gcloud app deploy \
