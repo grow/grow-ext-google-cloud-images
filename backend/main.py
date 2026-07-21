@@ -22,8 +22,6 @@ from google.cloud import exceptions as gcs_exceptions
 from google.cloud import storage
 
 APPID = os.environ.get('GOOGLE_CLOUD_PROJECT', '')
-BUCKET_NAME = '{}.appspot.com'.format(APPID)
-FOLDER = 'grow-ext-cloud-images-uploads'
 SERVICE_ACCOUNT_EMAIL = '{}@appspot.gserviceaccount.com'.format(APPID)
 
 IMAGE_EXTENSIONS = (
@@ -70,6 +68,10 @@ def split_bucket_path(path):
 def gcs_stat(path):
     """Returns the GCS blob at `path`, raising NotFound if it does not exist."""
     bucket_name, blob_name = split_bucket_path(path)
+    if not bucket_name or not blob_name:
+        # A path without both a bucket and an object component (e.g. a bare
+        # `/upload`) can never resolve to an object.
+        raise gcs_exceptions.NotFound(path)
     blob = get_storage_client().bucket(bucket_name).get_blob(blob_name)
     if blob is None:
         raise gcs_exceptions.NotFound(path)
@@ -111,15 +113,6 @@ def gcs_copy(src_path, dst_path, metadata=None):
     return new_blob
 
 
-def gcs_write_public(path, data, content_type):
-    """Writes `data` to `path` in GCS with a public-read ACL."""
-    bucket_name, blob_name = split_bucket_path(path)
-    blob = get_storage_client().bucket(bucket_name).blob(blob_name)
-    blob.upload_from_string(
-        data, content_type=content_type, predefined_acl='publicRead')
-    return blob
-
-
 def _created_timestamp(blob):
     """Returns the blob creation time as an epoch float (or None)."""
     if blob.time_created:
@@ -149,85 +142,17 @@ def is_publicly_readable(bucket_path):
     return resp.status_code == 200
 
 
-def _json_response(payload, status=200):
-    return flask.Response(
-        json.dumps(payload), status=status, mimetype='application/json')
+def looks_like_browser(user_agent):
+    """Returns whether a User-Agent looks like an interactive web browser.
 
-
-@app.route('/callback', methods=['POST'])
-def upload_callback():
-    upload_handler = blobstore.BlobstoreUploadHandler()
-    uploaded_files = upload_handler.get_uploads(flask.request.environ, 'file')
-    blob_info = uploaded_files[0]
-    blob_key = blob_info.key()
-    url = images.get_serving_url(blob_key, secure_url=True)
-    resp = _json_response({'url': url})
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    return resp
-
-
-@app.route('/upload', methods=['GET'])
-@app.route('/upload/<path:bucket>', methods=['GET'])
-def upload(bucket=None):
-    bucket = bucket or BUCKET_NAME
-    gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
-    action = blobstore.create_upload_url(
-        '/callback', gs_bucket_name=gs_bucket_name)
-    return flask.render_template(
-        'upload.html', bucket=gs_bucket_name, action=action)
-
-
-@app.route('/_api/create_upload_url', methods=['GET'])
-@app.route('/_api/create_upload_url/<path:bucket>', methods=['GET'])
-def create_upload_url(bucket=None):
-    bucket = bucket or BUCKET_NAME
-    gs_bucket_name = '{}/{}'.format(bucket, FOLDER)
-    upload_url = blobstore.create_upload_url(
-        '/callback', gs_bucket_name=gs_bucket_name)
-    return _json_response({'upload_url': upload_url})
-
-
-@app.route('/_api/upload_file', methods=['POST'])
-@app.route('/_api/upload_file/<path:bucket>', methods=['POST'])
-def upload_file_on_server(bucket=None):
-    bucket = bucket or BUCKET_NAME
-    uploaded = flask.request.files.get('file')
-    if uploaded is None:
-        return _json_response({'error': "'file'"}, status=400)
-    uploaded_content = uploaded.read()
-    uploaded_name = uploaded.filename
-    name, ext = os.path.splitext(uploaded_name)
-    request_hash = os.getenv('REQUEST_ID_HASH') or uuid.uuid4().hex
-    hashed_name = '{}_{}{}'.format(name, request_hash, ext)
-    gs_path = '/{}/{}/{}'.format(bucket, FOLDER, hashed_name)
-    if hashed_name.endswith('.svg'):
-        mimetype = 'image/svg+xml'
-    else:
-        mimetype = mimetypes.guess_type(hashed_name)[0]
-    gcs_write_public(gs_path, uploaded_content, mimetype)
-    blob_key = blobstore.create_gs_key('/gs{}'.format(gs_path))
-
-    if gs_path.endswith(IMAGE_EXTENSIONS):
-        serving_url = images.get_serving_url(blob_key, secure_url=True)
-        result = {'url': serving_url}
-        try:
-            data = blobstore.fetch_data(blob_key, 0, 50000)
-            image = images.Image(image_data=data)
-            result.update({
-                'gs_path': gs_path,
-                'height': image.height,
-                'width': image.width,
-            })
-        except images.BadImageError:
-            # If the header containing sizes isn't in the first 50000 bytes of
-            # the image. Or, if the file uploaded was just not a real image.
-            logging.exception('Failed to transform image.')
-    else:
-        serving_url = 'https://storage.googleapis.com{}'.format(gs_path)
-        result = {
-            'url': serving_url,
-        }
-    return _json_response(result)
+    The serving endpoint is only ever called programmatically (server-side
+    `requests`/grow preprocessors), which send agents like `python-requests/..`.
+    Every real browser sends a `Mozilla/..` token, so treating those as browser
+    traffic lets us reject casual URL-probing from a browser address bar. This
+    is defense-in-depth only (User-Agent is trivially spoofable); the real
+    control remains the public-readability check.
+    """
+    return 'mozilla/' in (user_agent or '').lower()
 
 
 def normalize_gs_path(gs_path, locale):
@@ -261,6 +186,12 @@ def normalize_gs_path(gs_path, locale):
 @app.route('/', defaults={'gs_path': ''}, methods=['GET'])
 @app.route('/<path:gs_path>', methods=['GET'])
 def get_serving_url(gs_path):
+    # The serving endpoint is meant to be called programmatically. Reject
+    # browser traffic with a generic 404 to discourage casual URL-probing of
+    # known public asset paths from a browser address bar. Defense-in-depth
+    # only; the public-readability check below is the real control.
+    if looks_like_browser(flask.request.headers.get('User-Agent')):
+        flask.abort(404)
     gs_path = flask.request.args.get('gs_path') or gs_path
     reset_cache = flask.request.args.get('reset_cache', '')
     locale = flask.request.args.get('locale', '')
@@ -274,9 +205,12 @@ def get_serving_url(gs_path):
         flask.abort(400, description=detail)
     try:
         gs_path, stat_result = normalize_gs_path(gs_path, locale)
-    except (gcs_exceptions.NotFound, gcs_exceptions.Forbidden):
-        # Object does not exist (or is not accessible). Return a generic 404 so
-        # a nonexistent path and a non-public path are indistinguishable.
+    except (gcs_exceptions.GoogleCloudError, ValueError):
+        # Object does not exist, is inaccessible, or the path is otherwise not
+        # resolvable (e.g. a syntactically invalid bucket component such as a
+        # bare `/_api/...`). Return a generic 404 so a nonexistent path and a
+        # non-public path are indistinguishable. `ValueError` covers invalid
+        # bucket names rejected client-side by the storage library.
         flask.abort(404)
     bucket_path = gs_path[3:]  # bucket/path.mp4
 
