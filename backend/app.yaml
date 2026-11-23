@@ -6,6 +6,12 @@ app_engine_apis: true
 
 entrypoint: gunicorn -b :$PORT -w 2 main:app
 
+# Recommended security configuration (set via Secret Manager or env_variables):
+# env_variables:
+#   ALLOWED_BUCKETS: "my-public-assets-bucket,my-other-bucket"
+#   API_KEY: "<long-random-secret>"
+
 handlers:
   - url: .*
     script: auto
+    secure: always

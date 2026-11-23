@@ -1,28 +1,42 @@
 """ext-cloud-images backend.
 
-Migrated from the legacy App Engine Python 2.7 runtime to Python 3. The Images
-and Blobstore APIs are still provided through the App Engine bundled services
-(via `appengine-python-standard`), request routing uses Flask, and Google Cloud
-Storage access uses the `google-cloud-storage` client library (the legacy
-`cloudstorage` client is not available on Python 3).
+Zero-framework WSGI service for App Engine Python 3 that generates Google Cloud
+Images serving URLs for publicly readable Google Cloud Storage objects.
+
+Security model (confused-deputy defenses):
+- Optional ``API_KEY`` authentication (Bearer or ``X-API-Key`` header) using
+  constant-time comparison.
+- Optional ``ALLOWED_BUCKETS`` allowlist (comma-separated GCS bucket names) so
+  the App Engine service account can never be induced to access buckets outside
+  the configured set.
+- Strict validation of bucket names, object paths, and locale strings to block
+  path traversal (``..`` / ``.``), query/fragment smuggling (``?``, ``#``,
+  ``%``), backslashes, and control characters.
+- Anonymous public-readability verification via the unauthenticated GCS JSON
+  metadata endpoint (with redirects disabled) *before* any App Engine bundled
+  service API is invoked, eliminating privileged-SA existence oracles.
+- Strictly read-only on GET requests: no GCS object copies or metadata
+  mutations, and ``reset_cache`` (``images.delete_serving_url``) is only
+  permitted for authenticated callers.
 """
 
+import hmac
 import json
 import logging
-import mimetypes
 import os
-import uuid
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
 
-import flask
-import requests
-from google.appengine.api import images
-from google.appengine.api import wrap_wsgi_app
-from google.appengine.ext import blobstore
-from google.cloud import exceptions as gcs_exceptions
-from google.cloud import storage
-
-APPID = os.environ.get('GOOGLE_CLOUD_PROJECT', '')
-SERVICE_ACCOUNT_EMAIL = '{}@appspot.gserviceaccount.com'.format(APPID)
+try:
+    from google.appengine.api import images, wrap_wsgi_app
+    from google.appengine.ext import blobstore
+except ImportError:  # pragma: no cover - allows importing/testing outside App Engine
+    images = None
+    blobstore = None
+    wrap_wsgi_app = None
 
 IMAGE_EXTENSIONS = (
     '.gif',
@@ -39,244 +53,280 @@ BLOB_EXTENSIONS = (
     '.webm',
 )
 
-# Timeout (in seconds) for the anonymous public-readability check.
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS + BLOB_EXTENSIONS
+
+# Timeout (in seconds) for the anonymous public-readability / metadata check.
 PUBLIC_READ_CHECK_TIMEOUT = 10
 
-app = flask.Flask(__name__)
-# Enable access to the App Engine bundled services (Images, Blobstore, etc.).
-app.wsgi_app = wrap_wsgi_app(app.wsgi_app)
+# GCS bucket naming rules: 3-63 chars, lowercase letters, digits, dots, hyphens,
+# underscores, starting and ending with alphanumeric.
+_BUCKET_RE = re.compile(r'^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$')
+_LOCALE_RE = re.compile(r'^[A-Za-z0-9_-]{0,32}$')
+_FORBIDDEN_BLOB_CHARS = frozenset('?#%\\')
 
-_storage_client = None
+_SECURITY_HEADERS = [
+    ('X-Content-Type-Options', 'nosniff'),
+    ('X-Frame-Options', 'DENY'),
+    ('Cache-Control', 'no-store'),
+]
 
 
-def get_storage_client():
-    """Returns a lazily-initialized Cloud Storage client."""
-    global _storage_client
-    if _storage_client is None:
-        _storage_client = storage.Client()
-    return _storage_client
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Prevents urllib from following HTTP 3xx redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def get_allowed_buckets():
+    """Returns the configured bucket allowlist as a frozenset (empty = unset)."""
+    raw = os.environ.get('ALLOWED_BUCKETS', '')
+    return frozenset(b.strip() for b in raw.split(',') if b.strip())
+
+
+def get_api_key():
+    """Returns the configured API key, or empty string if unset."""
+    return os.environ.get('API_KEY', '').strip()
+
+
+def extract_caller_token(environ):
+    """Extracts an API token from Authorization Bearer or X-API-Key headers."""
+    auth = environ.get('HTTP_AUTHORIZATION', '')
+    if auth.lower().startswith('bearer '):
+        return auth[7:].strip()
+    return environ.get('HTTP_X_API_KEY', '').strip()
+
+
+def is_authenticated(environ):
+    """Returns True iff API_KEY is configured and matches the caller token."""
+    expected = get_api_key()
+    if not expected:
+        return False
+    provided = extract_caller_token(environ)
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
+def looks_like_browser(user_agent):
+    """Returns whether a User-Agent looks like an interactive web browser.
+
+    Defense-in-depth only (User-Agent is trivially spoofable); the real
+    controls are ``ALLOWED_BUCKETS``, ``API_KEY``, and the anonymous
+    public-readability check.
+    """
+    return 'mozilla/' in (user_agent or '').lower()
+
+
+def validate_bucket_name(bucket_name):
+    """Validates a GCS bucket name against GCS naming rules and allowlist."""
+    if not bucket_name or '..' in bucket_name or not _BUCKET_RE.match(bucket_name):
+        return False
+    allowed = get_allowed_buckets()
+    return not (allowed and bucket_name not in allowed)
+
+
+def validate_locale(locale):
+    """Validates a locale identifier so it cannot inject path characters."""
+    return bool(_LOCALE_RE.match(locale or ''))
+
+
+def validate_blob_name(blob_name):
+    """Validates a GCS object name to prevent traversal or URL smuggling."""
+    if not blob_name or len(blob_name.encode('utf-8')) > 1024:
+        return False
+    if blob_name.startswith('/') or blob_name.endswith('/'):
+        return False
+    for ch in blob_name:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F or ch in _FORBIDDEN_BLOB_CHARS:
+            return False
+    segments = blob_name.split('/')
+    return all(seg not in ('', '.', '..') for seg in segments)
 
 
 def split_bucket_path(path):
-    """Splits a `/bucket/object/name` path into (bucket, object) parts."""
+    """Splits a ``/bucket/object/name`` path into ``(bucket, object)`` parts."""
     parts = path.lstrip('/').split('/', 1)
     bucket_name = parts[0]
     blob_name = parts[1] if len(parts) > 1 else ''
     return bucket_name, blob_name
 
 
-def gcs_stat(path):
-    """Returns the GCS blob at `path`, raising NotFound if it does not exist."""
-    bucket_name, blob_name = split_bucket_path(path)
-    if not bucket_name or not blob_name:
-        # A path without both a bucket and an object component (e.g. a bare
-        # `/upload`) can never resolve to an object.
-        raise gcs_exceptions.NotFound(path)
-    blob = get_storage_client().bucket(bucket_name).get_blob(blob_name)
-    if blob is None:
-        raise gcs_exceptions.NotFound(path)
-    return blob
+def candidate_blob_names(raw_blob_name, locale):
+    """Generates candidate object paths for optional ``{locale}`` substitution."""
+    if '{locale}' not in raw_blob_name:
+        return [raw_blob_name]
+
+    candidates = []
+    if locale:
+        candidates.append(raw_blob_name.replace('{locale}', locale))
+        if '_' in locale:
+            _, territory = locale.split('_', 1)
+            if territory:
+                candidates.append(raw_blob_name.replace('{locale}', f'_{territory}'))
+    base = raw_blob_name.replace('@{locale}', '').replace('{locale}', '')
+    if base not in candidates:
+        candidates.append(base)
+    return candidates
 
 
-def _apply_metadata(blob, metadata):
-    """Applies a legacy cloudstorage-style metadata dict to a GCS blob."""
-    custom = dict(blob.metadata or {})
-    changed_custom = False
-    for key, value in metadata.items():
-        lowered = key.lower()
-        if lowered == 'cache-control':
-            blob.cache_control = value
-        elif lowered == 'content-type':
-            blob.content_type = value
-        elif lowered.startswith('x-goog-meta-'):
-            custom[key[len('x-goog-meta-'):]] = value
-            changed_custom = True
-        else:
-            custom[key] = value
-            changed_custom = True
-    if changed_custom:
-        blob.metadata = custom
+def _parse_rfc3339_timestamp(value):
+    """Parses a GCS RFC 3339 ``timeCreated`` string into an epoch float."""
+    if not value:
+        return None
+    try:
+        normalized = value[:-1] + '+00:00' if value.endswith('Z') else value
+        return datetime.fromisoformat(normalized).timestamp()
+    except ValueError:
+        return None
 
 
-def gcs_copy(src_path, dst_path, metadata=None):
-    """Copies a GCS object, optionally updating metadata on the destination."""
-    src_bucket_name, src_blob_name = split_bucket_path(src_path)
-    dst_bucket_name, dst_blob_name = split_bucket_path(dst_path)
-    client = get_storage_client()
-    src_bucket = client.bucket(src_bucket_name)
-    dst_bucket = client.bucket(dst_bucket_name)
-    src_blob = src_bucket.blob(src_blob_name)
-    new_blob = src_bucket.copy_blob(src_blob, dst_bucket, dst_blob_name)
-    if metadata:
-        _apply_metadata(new_blob, metadata)
-        new_blob.patch()
-    return new_blob
+def fetch_public_object_metadata(bucket_name, blob_name):
+    """Fetches metadata for an anonymously readable GCS object.
+
+    Uses the unauthenticated GCS JSON metadata endpoint with redirects disabled.
+    If the object does not exist or is not publicly readable, returns ``None``.
+    Cross-checks the returned ``bucket`` and ``name`` fields against the
+    requested ``(bucket_name, blob_name)`` to guarantee a 1-to-1 match.
+    """
+    quoted_bucket = urllib.parse.quote(bucket_name, safe='')
+    quoted_blob = urllib.parse.quote(blob_name, safe='')
+    url = f'https://storage.googleapis.com/storage/v1/b/{quoted_bucket}/o/{quoted_blob}'
+    req = urllib.request.Request(url, method='GET')
+    try:
+        with _NO_REDIRECT_OPENER.open(req, timeout=PUBLIC_READ_CHECK_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+
+    if payload.get('bucket') != bucket_name or payload.get('name') != blob_name:
+        return None
+
+    raw_size = payload.get('size')
+    try:
+        size = int(raw_size) if raw_size is not None else None
+    except (TypeError, ValueError):
+        size = None
+
+    return {
+        'content_type': payload.get('contentType'),
+        'created': _parse_rfc3339_timestamp(payload.get('timeCreated')),
+        'etag': payload.get('etag'),
+        'metadata': payload.get('metadata'),
+        'size': size,
+    }
 
 
-def _created_timestamp(blob):
-    """Returns the blob creation time as an epoch float (or None)."""
-    if blob.time_created:
-        return blob.time_created.timestamp()
+def resolve_public_object(gs_path, locale):
+    """Validates input and resolves the first publicly readable GCS object.
+
+    Returns ``(bucket_name, blob_name, metadata)`` or ``None``.
+    """
+    if not validate_locale(locale):
+        return None
+
+    bucket_name, raw_blob_name = split_bucket_path(gs_path)
+    if '{locale}' in bucket_name or not validate_bucket_name(bucket_name):
+        return None
+
+    for blob_name in candidate_blob_names(raw_blob_name, locale):
+        if not validate_blob_name(blob_name):
+            continue
+        if not blob_name.lower().endswith(ALLOWED_EXTENSIONS):
+            continue
+        metadata = fetch_public_object_metadata(bucket_name, blob_name)
+        if metadata is not None:
+            return bucket_name, blob_name, metadata
     return None
 
 
-def is_publicly_readable(bucket_path):
-    """Returns whether a GCS object is anonymously (publicly) readable.
-
-    The service processes requests using a privileged service account that has
-    read access to many buckets. Without this check, an unauthenticated caller
-    could ask the service to read an IAM-restricted object and re-serve it
-    publicly, bypassing GCS access controls. By requiring the source object to
-    already be anonymously readable, the service can only ever expose content
-    that is already public.
-    """
-    url = 'https://storage.googleapis.com/{}'.format(bucket_path.lstrip('/'))
-    try:
-        # This request is unauthenticated (no service account credentials are
-        # attached), so it reflects true public accessibility of the object.
-        resp = requests.head(url, timeout=PUBLIC_READ_CHECK_TIMEOUT)
-    except Exception:
-        logging.exception(
-            'Error checking public access for {}'.format(bucket_path))
-        return False
-    return resp.status_code == 200
+def _respond(start_response, status, body=b'', content_type='text/plain; charset=utf-8'):
+    headers = [
+        ('Content-Type', content_type),
+        ('Content-Length', str(len(body))),
+        *_SECURITY_HEADERS,
+    ]
+    start_response(status, headers)
+    return [body]
 
 
-def looks_like_browser(user_agent):
-    """Returns whether a User-Agent looks like an interactive web browser.
-
-    The serving endpoint is only ever called programmatically (server-side
-    `requests`/grow preprocessors), which send agents like `python-requests/..`.
-    Every real browser sends a `Mozilla/..` token, so treating those as browser
-    traffic lets us reject casual URL-probing from a browser address bar. This
-    is defense-in-depth only (User-Agent is trivially spoofable); the real
-    control remains the public-readability check.
-    """
-    return 'mozilla/' in (user_agent or '').lower()
+def _respond_json(start_response, status, data):
+    body = json.dumps(data).encode('utf-8')
+    return _respond(start_response, status, body, content_type='application/json')
 
 
-def normalize_gs_path(gs_path, locale):
-    gs_path = '/gs/{}'.format(gs_path.lstrip('/'))
-    if '{locale}' not in gs_path:
-        stat_result = gcs_stat(gs_path[3:])
-        return gs_path, stat_result
-    # Retrieve a localized image if it exists, otherwise strip the locale
-    # placeholder from the path and return the base image.
-    localized_gs_path = gs_path.replace('{locale}', locale)
-    try:
-        stat_result = gcs_stat(localized_gs_path[3:])
-        return localized_gs_path, stat_result
-    except (gcs_exceptions.NotFound, gcs_exceptions.Forbidden):
-        # If no file exists for the full locale identifier (language and
-        # territory), attempt retrieving a file for just the territory.
-        if '_' in locale:
-            language, territory = locale.split('_', 1)
-            localized_gs_path = \
-                gs_path.replace('{locale}', '_{}'.format(territory))
-            try:
-                stat_result = gcs_stat(localized_gs_path[3:])
-                return localized_gs_path, stat_result
-            except (gcs_exceptions.NotFound, gcs_exceptions.Forbidden):
-                pass
-    gs_path = gs_path.replace('@{locale}', '')
-    stat_result = gcs_stat(gs_path[3:])
-    return gs_path, stat_result
+def wsgi_app(environ, start_response):
+    """PEP 3333 WSGI application for generating Google Cloud Images URLs."""
+    method = environ.get('REQUEST_METHOD', 'GET').upper()
+    if method != 'GET':
+        return _respond(start_response, '405 Method Not Allowed')
 
+    if looks_like_browser(environ.get('HTTP_USER_AGENT')):
+        return _respond(start_response, '404 Not Found')
 
-@app.route('/', defaults={'gs_path': ''}, methods=['GET'])
-@app.route('/<path:gs_path>', methods=['GET'])
-def get_serving_url(gs_path):
-    # The serving endpoint is meant to be called programmatically. Reject
-    # browser traffic with a generic 404 to discourage casual URL-probing of
-    # known public asset paths from a browser address bar. Defense-in-depth
-    # only; the public-readability check below is the real control.
-    if looks_like_browser(flask.request.headers.get('User-Agent')):
-        flask.abort(404)
-    gs_path = flask.request.args.get('gs_path') or gs_path
-    reset_cache = flask.request.args.get('reset_cache', '')
-    locale = flask.request.args.get('locale', '')
+    api_key_configured = bool(get_api_key())
+    caller_authed = is_authenticated(environ)
+    if api_key_configured and not caller_authed:
+        return _respond_json(start_response, '401 Unauthorized', {'error': 'Unauthorized'})
+
+    query = urllib.parse.parse_qs(environ.get('QUERY_STRING', ''), keep_blank_values=False)
+    path_info = environ.get('PATH_INFO', '').lstrip('/')
+    gs_path = (query.get('gs_path', [''])[0] or path_info).strip()
+    reset_cache = bool(query.get('reset_cache', [''])[0])
+    locale = query.get('locale', [''])[0]
+
     if not gs_path:
-        detail = (
-            'Usage: Share GCS objects with `{}`. Make requests to:'
-            ' {}://{}/<bucket>/<path>.ext'.format(
-                SERVICE_ACCOUNT_EMAIL,
-                flask.request.scheme,
-                flask.request.host))
-        flask.abort(400, description=detail)
-    try:
-        gs_path, stat_result = normalize_gs_path(gs_path, locale)
-    except (gcs_exceptions.GoogleCloudError, ValueError):
-        # Object does not exist, is inaccessible, or the path is otherwise not
-        # resolvable (e.g. a syntactically invalid bucket component such as a
-        # bare `/_api/...`). Return a generic 404 so a nonexistent path and a
-        # non-public path are indistinguishable. `ValueError` covers invalid
-        # bucket names rejected client-side by the storage library.
-        flask.abort(404)
-    bucket_path = gs_path[3:]  # bucket/path.mp4
+        return _respond_json(
+            start_response,
+            '400 Bad Request',
+            {'error': 'Missing required GCS path: /<bucket>/<object>.ext'},
+        )
 
-    # Only serve objects that are already anonymously (publicly) readable.
-    # The service account has read access to many restricted buckets, so
-    # without this check an unauthenticated caller could use this service as
-    # an open proxy to read IAM-restricted objects and re-serve them
-    # publicly. Legitimate assets served through this service are already
-    # public, so this does not affect normal usage.
-    if not is_publicly_readable(bucket_path):
-        # Use a generic 404 that does not reveal whether the object exists or is
-        # merely non-public, to avoid leaking GCS object names via prober-style
-        # enumeration attacks.
-        flask.abort(404)
+    if reset_cache and not caller_authed:
+        return _respond_json(
+            start_response,
+            '403 Forbidden',
+            {'error': 'Authentication is required for reset_cache'},
+        )
 
-    # Image-handling.
-    if gs_path.endswith(IMAGE_EXTENSIONS):
-        blob_key = blobstore.create_gs_key(gs_path)
+    resolved = resolve_public_object(gs_path, locale)
+    if resolved is None:
+        return _respond(start_response, '404 Not Found')
+
+    bucket_name, blob_name, obj_meta = resolved
+
+    if blob_name.lower().endswith(IMAGE_EXTENSIONS):
+        if images is None or blobstore is None:
+            return _respond_json(
+                start_response,
+                '500 Internal Server Error',
+                {'error': 'App Engine Images API is unavailable'},
+            )
+        full_gs_path = f'/gs/{bucket_name}/{blob_name}'
+        blob_key = blobstore.create_gs_key(full_gs_path)
         if reset_cache:
             try:
                 images.delete_serving_url(blob_key)
-            except images.Error as e:
-                logging.error(
-                    'Error deleting {} -> {}'.format(gs_path, str(e)))
+            except images.Error:
+                logging.exception('Error deleting serving URL for %s', full_gs_path)
         try:
             url = images.get_serving_url(blob_key, secure_url=True)
-        except images.AccessDeniedError:
-            flask.abort(
-                400,
-                description=(
-                    'Ensure the following service account has access to the'
-                    ' object in Google Cloud Storage: {}'.format(
-                        SERVICE_ACCOUNT_EMAIL)))
-        except images.ObjectNotFoundError:
-            flask.abort(
-                400,
-                description=(
-                    'The object was not found. Ensure the following service'
-                    ' account has access to the object in Google Cloud'
-                    ' Storage: {}'.format(SERVICE_ACCOUNT_EMAIL)))
-        except images.TransformationError:
-            # A TransformationError may happen in several scenarios - if
-            # the file is simply too large for the images service to
-            # handle, if the image service doesn't have access to the file,
-            # or if the file was already uploaded to the image service by
-            # another App Engine app. For the latter case, we can try to
-            # work around that by copying the file and re-uploading it to
-            # the image service.
-            copied_bucket_path = bucket_path + '.copy'
-            gcs_copy(bucket_path, copied_bucket_path)
-            copied_gs_path = '/gs{}'.format(copied_bucket_path)
-            blob_key = blobstore.create_gs_key(copied_gs_path)
-            try:
-                url = images.get_serving_url(blob_key, secure_url=True)
-            except images.TransformationError:
-                message = ('Failed to copy file to attempt to fix'
-                           ' TransformationError -> {}')
-                logging.error(message.format(copied_bucket_path))
-                logging.exception('Debugging TransformationError.')
-                flask.abort(
-                    400,
-                    description=(
-                        'There was a problem transforming the image. Ensure'
-                        ' the following service account has access to the'
-                        ' object in Google Cloud Storage: {}'.format(
-                            SERVICE_ACCOUNT_EMAIL)))
+        except (
+            images.AccessDeniedError,
+            images.ObjectNotFoundError,
+            images.TransformationError,
+        ):
+            logging.exception('Error generating serving URL for %s', full_gs_path)
+            return _respond_json(
+                start_response,
+                '400 Bad Request',
+                {'error': 'Unable to generate image serving URL for object'},
+            )
 
         image_metadata = {}
         try:
@@ -287,91 +337,48 @@ def get_serving_url(gs_path):
                 'width': image.width,
             }
         except images.BadImageError:
-            # If the header containing sizes isn't in the first 50000 bytes of
-            # the image. Or, if the file uploaded was just not a real image.
-            logging.exception('Failed to transform image.')
-        response_content = json.dumps({
-            'content_type': stat_result.content_type,
-            'created': _created_timestamp(stat_result),
-            'etag': stat_result.etag,
-            'image_metadata': image_metadata,
-            'metadata': stat_result.metadata,
-            'size': stat_result.size,
-            'url': url,
-        })
+            logging.exception('Failed to inspect image dimensions for %s', full_gs_path)
 
-    # Non-image (i.e. SVG, blob file) handling.
-    else:
-        video_metadata = {}
-        ext = gs_path.split('.')[-1]  # mp4
-        bucket = bucket_path.lstrip('/').split('/')[0]  # bucket
-        basename = str(uuid.uuid4())
-        blob_bucket_path = '/{}/blobs/{}.{}'.format(bucket, basename, ext)
-        url = 'https://storage.googleapis.com{}'.format(blob_bucket_path)
-        original_bucket_path = bucket_path
-        if bucket_path.endswith('.svg'):
-            mimetype = 'image/svg+xml'
-        else:
-            mimetype = mimetypes.guess_type(bucket_path)[0]
-        metadata = {
-            'Cache-Control': 'max-age=31536000',
-            'x-goog-meta-optimized': 'true',
-            'x-goog-meta-url': url,
-        }
-        if mimetype:
-            metadata.update({'content-type': mimetype})
-        try:
-            stat_result = gcs_stat(blob_bucket_path)
-            # Use the blob_bucket_path to support obfuscated mp4 files.
-            bucket_path = blob_bucket_path
-        except gcs_exceptions.NotFound:
-            # Copy file to blob path.
-            gcs_copy(bucket_path, blob_bucket_path, metadata=metadata)
-            bucket_path = blob_bucket_path
-        except gcs_exceptions.Forbidden:
-            pass
-        # Also ensure the original item's metadata is updated.
-        gcs_copy(original_bucket_path, original_bucket_path, metadata=metadata)
-        response_content = json.dumps({
-            'content_type': stat_result.content_type,
-            'created': _created_timestamp(stat_result),
-            'etag': stat_result.etag,
-            'image_metadata': video_metadata,
-            'metadata': stat_result.metadata,
-            'size': stat_result.size,
-            'url': url,
-        })
+        return _respond_json(
+            start_response,
+            '200 OK',
+            {
+                'content_type': obj_meta['content_type'],
+                'created': obj_meta['created'],
+                'etag': obj_meta['etag'],
+                'image_metadata': image_metadata,
+                'metadata': obj_meta['metadata'],
+                'size': obj_meta['size'],
+                'url': url,
+            },
+        )
 
-    return flask.Response(response_content, mimetype='application/json')
+    # Allowed non-image public blobs (.json, .mp4, .svg, .webm):
+    # Return the direct public GCS URL without copying or mutating the object.
+    quoted_bucket = urllib.parse.quote(bucket_name, safe='')
+    quoted_blob = urllib.parse.quote(blob_name, safe='/')
+    direct_url = f'https://storage.googleapis.com/{quoted_bucket}/{quoted_blob}'
+    return _respond_json(
+        start_response,
+        '200 OK',
+        {
+            'content_type': obj_meta['content_type'],
+            'created': obj_meta['created'],
+            'etag': obj_meta['etag'],
+            'image_metadata': {},
+            'metadata': obj_meta['metadata'],
+            'size': obj_meta['size'],
+            'url': direct_url,
+        },
+    )
 
 
-@app.errorhandler(404)
-def handle_not_found(error):
-    # Return an empty 404 body so that neither existence nor accessibility of a
-    # GCS object can be inferred from the response.
-    return flask.Response('', status=404)
-
-
-@app.before_request
-def handle_cors_preflight():
-    if flask.request.method == 'OPTIONS':
-        resp = flask.Response('', status=200)
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Access-Control-Allow-Methods'] = '*'
-        resp.headers['Access-Control-Allow-Headers'] = \
-            'origin, content-type, accept'
-        return resp
-
-
-@app.after_request
-def add_cors_header(response):
-    if 'Access-Control-Allow-Origin' not in response.headers:
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = '*'
-        response.headers['Access-Control-Allow-Headers'] = \
-            'origin, content-type, accept'
-    return response
+app = wrap_wsgi_app(wsgi_app) if wrap_wsgi_app is not None else wsgi_app
 
 
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8080, debug=True)
+    from wsgiref.simple_server import make_server
+
+    port = int(os.environ.get('PORT', '8080'))
+    with make_server('127.0.0.1', port, app) as httpd:
+        httpd.serve_forever()

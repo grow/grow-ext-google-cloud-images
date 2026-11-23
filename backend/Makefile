@@ -1,4 +1,4 @@
-$project :=
+project ?=
 
 install:
 	python3 -m venv env
